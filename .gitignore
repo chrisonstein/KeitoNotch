@@ -1,0 +1,6 @@
+# This repository publishes only the Windows app (windows/) and its CI.
+# The macOS Swift source stays local: everything else at the top level is ignored.
+/*
+!/.gitignore
+!/.github/
+!/windows/

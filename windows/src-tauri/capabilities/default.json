@@ -1,0 +1,50 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Keito Notch windows",
+  "windows": [
+    "notch",
+    "toast",
+    "settings"
+  ],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-set-webview-zoom",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "core:event:default",
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://*"
+        }
+      ]
+    },
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://app.keito.ai/*"
+        },
+        {
+          "url": "https://*.atlassian.net/*"
+        },
+        {
+          "url": "https://www.googleapis.com/*"
+        },
+        {
+          "url": "https://oauth2.googleapis.com/*"
+        }
+      ]
+    },
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Keito Notch",
+  "version": "0.1.0",
+  "identifier": "ai.keito.notch",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "notch",
+        "url": "index.html?view=notch",
+        "title": "Keito Notch",
+        "width": 50,
+        "height": 96,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "visible": false
+      },
+      {
+        "label": "toast",
+        "url": "index.html?view=toast",
+        "title": "Keito Notch",
+        "width": 440,
+        "height": 64,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focus": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost ws://localhost:1420"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI3QzdGRDAzMkY1NTk3MTIKUldRU2wxVXZBLzNISjNPN1RWT1FldHYwNTdiaWd3RFZKRzVxaHA3Y0xYM3laOHIwUy9SbHlyc3QK",
+      "endpoints": [
+        "https://github.com/chrisonstein/KeitoNotch/releases/download/windows-updates/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
