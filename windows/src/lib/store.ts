@@ -6,6 +6,7 @@ import { KeitoClient, friendlyError } from "./keito";
 import { JiraClient } from "./jira";
 import { CalendarProblem, GoogleAuth, GoogleCalendarClient, NotSignedIn, dedupeKey } from "./google";
 import { matchEvent, type Match } from "./matcher";
+import { idleStep } from "./idle";
 import { native } from "./native";
 import { hasGoogleClient, hasJira, hasKeito, loadCredentials, loadPrefs, savePrefs, type Credentials, type Favorite, type Prefs } from "./prefs";
 import * as targets from "./targets";
@@ -733,17 +734,20 @@ export class AppStore {
   private async checkIdle() {
     if (!this.prefs.idleReminder || !this.running || this.idlePrompt) {
       this.idleSince = null;
+      // No previous check: the next timer must not mistake this quiet time for sleep.
+      this.idleCheckAt = 0;
       return;
     }
     // Every 5 s is plenty.
-    if (Date.now() - this.idleCheckAt < 5000) return;
-    this.idleCheckAt = Date.now();
+    const now = Date.now();
+    if (now - this.idleCheckAt < 5000) return;
+    const lastCheckAt = this.idleCheckAt;
+    this.idleCheckAt = now;
     const idle = await native.idleSeconds().catch(() => 0);
-    if (idle >= 600) {
-      this.idleSince ??= new Date(Date.now() - idle * 1000);
-    } else if (this.idleSince && idle < 10) {
-      this.idlePrompt = { start: this.idleSince, end: new Date(Date.now() - idle * 1000) };
-      this.idleSince = null;
+    const r = idleStep({ since: this.idleSince, lastCheckAt }, now, idle);
+    this.idleSince = r.since;
+    if (r.prompt) {
+      this.idlePrompt = r.prompt;
       this.notify();
       this.onIdleReturn?.();
     }
