@@ -3,12 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, Runtime};
+use tauri::{AppHandle, Manager, Monitor, Runtime};
 
 use crate::platform;
 
 /// A rectangle in physical pixels.
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Deserialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -160,8 +160,7 @@ pub fn place_notch(app: AppHandle, state: tauri::State<'_, PlacementState>, args
     let screen = rect_screen(&monitor);
     let work = rect_work(&monitor);
     let r = compute(&args, screen, work, scale);
-    win.set_size(PhysicalSize::new(r.w as u32, r.h as u32)).map_err(|e| e.to_string())?;
-    win.set_position(PhysicalPosition::new(r.x, r.y)).map_err(|e| e.to_string())?;
+    platform::set_bounds(&win, r)?;
     let name = name_of(&monitor);
     *state.0.lock().map_err(|e| e.to_string())? = Placement { monitor: name.clone(), notch: r, screen, work, scale };
     Ok(name)
@@ -270,6 +269,40 @@ mod tests {
         assert_eq!(compute(&args("tray", "", "", 0.0), SCREEN, WORK, 1.0), Rect { x: 1810, y: 972, w: 100, h: 50 });
         let top_bar = Rect { x: 0, y: 48, w: 1920, h: 1032 };
         assert_eq!(compute(&args("tray", "", "", 0.0), SCREEN, top_bar, 1.0), Rect { x: 1810, y: 58, w: 100, h: 50 });
+    }
+
+    /// The hover morph (NotchApp.tsx, morphAnchor) draws the tab against one corner of the window and grows
+    /// the card from there. That only looks still if the window itself grows away from that same corner.
+    #[test]
+    fn hover_grows_away_from_the_morph_anchor() {
+        // (style, edge, island, tab w×h, peek w×h, anchor x, anchor y) — sizes from sizeFor() in NotchApp.tsx.
+        let cases = [
+            ("edge", "right", "", (50.0, 96.0), (316.0, 96.0), "right", "top"),
+            ("edge", "left", "", (50.0, 96.0), (316.0, 96.0), "left", "top"),
+            ("island", "", "topLeft", (112.0, 44.0), (340.0, 84.0), "left", "top"),
+            ("island", "", "top", (112.0, 44.0), (340.0, 84.0), "center", "top"),
+            ("island", "", "topRight", (112.0, 44.0), (340.0, 84.0), "right", "top"),
+            ("island", "", "bottomLeft", (112.0, 44.0), (340.0, 84.0), "left", "bottom"),
+            ("island", "", "bottomRight", (112.0, 44.0), (340.0, 84.0), "right", "bottom"),
+        ];
+        for scale in [1.0, 1.25, 1.5] {
+            for (style, edge, island, tab, peek, ax, ay) in cases {
+                let place = |(w, h): (f64, f64)| {
+                    compute(&PlaceArgs { width: w, height: h, ..args(style, edge, island, 0.4) }, SCREEN, WORK, scale)
+                };
+                let (t, p) = (place(tab), place(peek));
+                let what = format!("{style} {edge}{island} @{scale}: tab {t:?} peek {p:?}");
+                match ax {
+                    "left" => assert_eq!(t.x, p.x, "{what}"),
+                    "right" => assert_eq!(t.x + t.w, p.x + p.w, "{what}"),
+                    _ => assert!(((2 * t.x + t.w) - (2 * p.x + p.w)).abs() <= 2, "{what}"),
+                }
+                match ay {
+                    "top" => assert_eq!(t.y, p.y, "{what}"),
+                    _ => assert_eq!(t.y + t.h, p.y + p.h, "{what}"),
+                }
+            }
+        }
     }
 
     #[test]

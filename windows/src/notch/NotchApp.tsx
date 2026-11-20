@@ -2,7 +2,7 @@
 // Styles: edge notch (left/right edge), island (floating pill, five positions) or tray only (nothing on screen
 // until you click the tray icon). Follows the chosen display, tucks away next to full-screen apps, and can be
 // dragged to a new spot.
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { store, useStore } from "../lib/store";
@@ -49,6 +49,43 @@ export function sizeFor(mode: Mode, style: NotchStyle, wideTab: boolean) {
   return mode === "peek" ? { w: 316, h: 96 } : { w: wideTab ? 70 : 50, h: 96 };
 }
 
+/** How long the tab ↔ peek morph takes; the window shrinks only after it. Keep in sync with --morph in styles.css. */
+export const MORPH_MS = 220;
+
+/**
+ * The side of the window that stays put when the tab grows into the peek card. Mirrors compute() in
+ * placement.rs: the window grows away from this corner, so drawing the tab and the card against it keeps
+ * the tab still on screen while the window changes size underneath.
+ */
+export function morphAnchor(style: NotchStyle, edge: string, island: IslandPos): { x: "left" | "right" | "center"; y: "top" | "bottom" } {
+  if (style !== "island") return { x: edge === "left" ? "left" : "right", y: "top" };
+  const x = island.endsWith("Left") ? "left" : island.endsWith("Right") ? "right" : "center";
+  return { x, y: island.startsWith("bottom") ? "bottom" : "top" };
+}
+
+/** Where a box of `box` size sits inside a window of `win` size against an anchor (CSS px). */
+export function hitRect(a: ReturnType<typeof morphAnchor>, win: { w: number; h: number }, box: { w: number; h: number }) {
+  return {
+    x: a.x === "left" ? 0 : a.x === "right" ? win.w - box.w : (win.w - box.w) / 2,
+    y: a.y === "top" ? 0 : win.h - box.h,
+    w: box.w,
+    h: box.h,
+  };
+}
+
+/** Absolute position (CSS) for a box of w×h against an anchor. */
+function anchored(a: ReturnType<typeof morphAnchor>, w: number, h: number): CSSProperties {
+  return {
+    width: w,
+    height: h,
+    top: a.y === "top" ? 0 : "auto",
+    bottom: a.y === "bottom" ? 0 : "auto",
+    left: a.x === "left" ? 0 : a.x === "center" ? "50%" : "auto",
+    right: a.x === "right" ? 0 : "auto",
+    transform: a.x === "center" ? "translateX(-50%)" : undefined,
+  };
+}
+
 /** Island drop target: top or bottom half, then left / centre / right third (bottom has no centre: the taskbar). */
 export function snapIsland(fx: number, fy: number): IslandPos {
   if (fy >= 0.5) return fx < 0.5 ? "bottomLeft" : "bottomRight";
@@ -86,6 +123,9 @@ export function NotchApp() {
   const [dragPos, setDragPos] = useState<number | null>(null);
   const [dragIsland, setDragIsland] = useState<IslandPos | null>(null);
   const hoverTimer = useRef<number>();
+  /** Peek card drawn at full size (true) or still/again at tab size (false) — the morph's state. */
+  const [grown, setGrown] = useState(false);
+  const shrinkTimer = useRef<number>();
   const settingsOffered = useRef(false);
   const currentMonitor = useRef("");
   const blurClosedAt = useRef(0);
@@ -97,6 +137,7 @@ export function NotchApp() {
 
   const set = useCallback((m: Mode) => {
     window.clearTimeout(hoverTimer.current);
+    window.clearTimeout(shrinkTimer.current);
     setMode(m);
     if (isOpen(m)) void getCurrentWindow().setFocus();
     if (m === "collapsed") setRestartPrompt(null);
@@ -176,7 +217,12 @@ export function NotchApp() {
   const visible = style === "tray" ? open : open || mode === "peek" || !tucked;
   const zoom = textSize === "larger" ? 1.3 : textSize === "large" ? 1.15 : 1;
   const wideTab = s.prefs.showSeconds && !!s.running;
-  const size = sizeFor(mode, style, wideTab);
+  // Tab and peek share one card-sized window and one surface that changes size in CSS (the morph).
+  const morphMode = style !== "tray" && (mode === "collapsed" || mode === "peek");
+  const anchor = morphAnchor(style, edge, island);
+  const tabSize = sizeFor("collapsed", style, wideTab);
+  const peekSize = sizeFor("peek", style, wideTab);
+  const size = morphMode ? peekSize : sizeFor(mode, style, wideTab);
   const w = Math.round(size.w * zoom);
   const h = Math.round(size.h * zoom);
 
@@ -198,6 +244,47 @@ export function NotchApp() {
       cancelled = true;
     };
   }, [w, h, style, edge, position, island, display, displayTick, visible]);
+
+  // Any mode other than peek starts from the tab size again (a click from peek opens the day view).
+  useEffect(() => {
+    if (mode !== "peek") setGrown(false);
+  }, [mode]);
+
+  // Hover morph without resizing: in tab and peek mode the window keeps the card's size. Collapsed, it is
+  // clipped to the tab (clicks beside it fall through); on hover the clip goes and the card grows in CSS.
+  // Runs after the placement effect above, so the main thread places the window before clipping it.
+  const [dprTick, setDprTick] = useState(0);
+  useEffect(() => {
+    const onResize = () => setDprTick((t) => t + 1);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  useEffect(() => {
+    if (!morphMode) {
+      void native.setHitRegion(null).catch(() => undefined);
+      return;
+    }
+    if (mode === "peek") {
+      let live = true;
+      void native.setHitRegion(null)
+        .catch(() => undefined)
+        .then(() => requestAnimationFrame(() => {
+          if (live && modeRef.current === "peek") setGrown(true);
+        }));
+      return () => {
+        live = false;
+      };
+    }
+    const r = hitRect(anchor, peekSize, tabSize);
+    const dpr = window.devicePixelRatio || 1;
+    void native.setHitRegion({
+      x: Math.floor(r.x * dpr),
+      y: Math.floor(r.y * dpr),
+      w: Math.ceil(r.w * dpr),
+      h: Math.ceil(r.h * dpr),
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, morphMode, anchor.x, anchor.y, tabSize.w, tabSize.h, peekSize.w, peekSize.h, dprTick]);
 
   // Twice a second: follow the pointer's display, tuck away next to full-screen apps.
   useEffect(() => {
@@ -296,25 +383,50 @@ export function NotchApp() {
   };
 
   const onEnter = () => {
-    if (mode !== "collapsed" || !s.prefs.expandOnHover || drag.current || style === "tray") return;
+    if (!s.prefs.expandOnHover || drag.current || style === "tray") return;
+    if (mode === "peek") {
+      // Back while the card was shrinking: grow it again instead of collapsing.
+      window.clearTimeout(shrinkTimer.current);
+      setGrown(true);
+      return;
+    }
+    if (mode !== "collapsed") return;
     window.clearTimeout(hoverTimer.current);
     hoverTimer.current = window.setTimeout(() => setMode((m) => (m === "collapsed" ? "peek" : m)), 250);
   };
   const onLeave = () => {
     window.clearTimeout(hoverTimer.current);
-    if (mode === "peek") setMode("collapsed");
+    if (mode !== "peek") return;
+    // Shrink the card back into the tab first; the window follows when that's done, so it never jumps.
+    setGrown(false);
+    window.clearTimeout(shrinkTimer.current);
+    shrinkTimer.current = window.setTimeout(() => setMode((m) => (m === "peek" ? "collapsed" : m)), MORPH_MS);
   };
 
   const shape = style === "edge" ? `edge-${edge}` : style === "island" ? `island ${island.startsWith("bottom") ? "from-bottom" : "from-top"}` : "tray";
+  // Tab and peek: one surface that changes size in CSS (the morph); other modes fill the window.
+  const morphing = morphMode;
+  const surface = grown ? peekSize : tabSize;
+  // Layers sit inside the 1 px border.
+  const layer = (sz: { w: number; h: number }) => anchored(anchor, sz.w - 2, sz.h - 2);
   return (
     <div
-      key={open ? "open" : mode}
-      className={`notch ${shape} ${open ? "open" : ""} ${mode === "collapsed" ? "" : "enter"}`}
+      key={open ? "open" : morphing ? "morph" : mode}
+      className={`notch ${shape} ${open ? "open" : ""} ${morphing ? "morph" : mode === "collapsed" ? "" : "enter"}`}
+      style={morphing ? anchored(anchor, surface.w, surface.h) : undefined}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
     >
-      {mode === "collapsed" && style !== "tray" && <Tab nav={nav} island={style === "island"} drag={dragHandlers} />}
-      {mode === "peek" && <Peek nav={nav} />}
+      {morphing && (
+        <div className={`morph-layer ${grown ? "faded" : ""}`} style={layer(tabSize)}>
+          <Tab nav={nav} island={style === "island"} drag={dragHandlers} quiet={s.prefs.expandOnHover} />
+        </div>
+      )}
+      {morphing && mode === "peek" && (
+        <div className={`morph-layer ${grown ? "" : "faded"}`} style={layer(peekSize)}>
+          <Peek nav={nav} />
+        </div>
+      )}
       {mode === "day" && <DayView nav={nav} />}
       {mode === "form" && <EntryForm key={form.key} nav={nav} />}
       {mode === "calendar" && <CalendarView nav={nav} />}
@@ -333,7 +445,7 @@ function stopOrResumeLast(requestResume: (e: TimeEntry) => void) {
 }
 
 /** Ring with ■ (stop) or + (new entry) in the middle; always clickable. */
-function RingButton({ size, onNewEntry }: { size: number; onNewEntry: () => void }) {
+function RingButton({ size, onNewEntry, quiet = false }: { size: number; onNewEntry: () => void; quiet?: boolean }) {
   const s = useStore();
   const running = !!s.running;
   const target = s.target(new Date());
@@ -345,7 +457,7 @@ function RingButton({ size, onNewEntry }: { size: number; onNewEntry: () => void
       className="ring-btn"
       style={{ width: size, height: size }}
       disabled={s.isBusy}
-      title={`Today ${fmt.short(s.todaySeconds)} of ${fmt.short(target)} · ${label}`}
+      title={quiet ? undefined : `Today ${fmt.short(s.todaySeconds)} of ${fmt.short(target)} · ${label}`}
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation();
@@ -366,13 +478,18 @@ function RingButton({ size, onNewEntry }: { size: number; onNewEntry: () => void
 }
 
 /** Collapsed: ring + timer, stacked (edge) or side by side (island). Click opens the day view; drag moves it. */
-function Tab({ nav, island, drag }: { nav: Nav; island: boolean; drag: DragHandlers }) {
+/**
+ * `quiet`: no tooltips — used while "Peek on hover" is on. Hovering opens the card after 250 ms, long
+ * before a tooltip would; but Chromium takes the tooltip text when the pointer arrives and shows it ~1 s
+ * later anyway, over the grown card (filmed twice). Removing the title once the card grows is too late.
+ */
+function Tab({ nav, island, drag, quiet = false }: { nav: Nav; island: boolean; drag: DragHandlers; quiet?: boolean }) {
   const s = useStore();
   return (
     <div
       className={`tab ${island ? "row-tab" : ""}`}
       role="button"
-      title="Click for the day view · drag to move · right-click for settings"
+      title={quiet ? undefined : "Click for the day view · drag to move · right-click for settings"}
       aria-label={s.running ? `Timer running for ${s.projectName(s.running)}. Open day view` : "No timer running. Open day view"}
       onClick={() => nav.set("day")}
       onContextMenu={(e) => {
@@ -381,7 +498,7 @@ function Tab({ nav, island, drag }: { nav: Nav; island: boolean; drag: DragHandl
       }}
       {...drag}
     >
-      <RingButton size={island ? 26 : 34} onNewEntry={() => nav.openForm({ date: new Date() })} />
+      <RingButton size={island ? 26 : 34} onNewEntry={() => nav.openForm({ date: new Date() })} quiet={quiet} />
       <span className="time num">
         {s.running ? fmt.timer(s.elapsed, s.prefs.showSeconds) : <span className="muted">–</span>}
       </span>

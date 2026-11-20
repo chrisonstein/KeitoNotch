@@ -18,16 +18,45 @@ export class APIError extends Error {
   }
 }
 
-/** Plain-words messages for the usual setup mistakes. */
+/**
+ * The server's own reason from an error body, or null. Keito sends `{ error, error_description }`
+ * (https://keito.ai/docs/api-reference/error-handling); some endpoints use `message`; Jira sends
+ * `{ errorMessages: [...], errors: { field: text } }`.
+ */
+export function serverReason(body: string): string | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!json || typeof json !== "object") return null;
+  const o = json as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const fieldErrors = o.errors && typeof o.errors === "object" && !Array.isArray(o.errors) ? Object.values(o.errors) : [];
+  const listErrors = Array.isArray(o.errors) ? o.errors : [];
+  const reason =
+    text(o.error_description) ??
+    text(o.message) ??
+    (Array.isArray(o.errorMessages) ? o.errorMessages.map(text).find(Boolean) : null) ??
+    fieldErrors.map(text).find(Boolean) ??
+    listErrors.map((x) => text(x) ?? text((x as { message?: unknown })?.message)).find(Boolean) ??
+    null;
+  return reason ? reason.slice(0, 200) : null;
+}
+
+/** Plain-words messages for the usual setup mistakes; otherwise the server's own reason. */
 export function friendlyError(e: unknown): string {
   if (e instanceof APIError) {
     switch (e.status) {
       case 401: return "The key or token was rejected (401). Check that you copied it completely.";
       case 403: return "Access denied (403). For Keito, use a key with All permitted operations and the right Company ID.";
       case 404: return "Not found (404). Check the Company ID or Jira site.";
-      case 409: return e.message;
-      default: return `The server answered with error ${e.status}.`;
     }
+    // A message we wrote ourselves (e.g. the running-timer conflict) wins over the raw body.
+    if (!e.message.startsWith("HTTP ")) return e.message;
+    const reason = serverReason(e.body);
+    return reason ? `${reason} (${e.status})` : `The server answered with error ${e.status}.`;
   }
   if (e instanceof Error) {
     if (/network|fetch|dns|connect/i.test(e.message)) return "You're offline or the site didn't answer.";

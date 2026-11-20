@@ -140,6 +140,15 @@ input, textarea, select { font: inherit; color: inherit; user-select: text; }
 .notch.enter.edge-left { animation: in-left 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 .notch.enter.island.from-top { animation: in-top 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 .notch.enter.island.from-bottom, .notch.enter.tray { animation: in-bottom 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
+/* Hover morph: the tab grows into the peek card (and back) against the corner the window grows from,
+   so the window's own resize is never seen. 0.22s = MORPH_MS in NotchApp.tsx. */
+.notch.morph {
+  inset: auto;
+  transition: width 0.22s cubic-bezier(0.2, 0.9, 0.3, 1), height 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.morph-layer { position: absolute; display: flex; flex-direction: column; transition: opacity 0.14s ease; }
+.morph-layer.faded { opacity: 0; pointer-events: none; }
+
 @keyframes in-right { from { transform: translateX(24px); opacity: 0.4; } }
 @keyframes in-left { from { transform: translateX(-24px); opacity: 0.4; } }
 @keyframes in-top { from { transform: translateY(-16px) scale(0.98); opacity: 0.4; } }
