@@ -19,7 +19,8 @@ const manifest = {
   platforms: {
     "windows-x86_64": {
       signature,
-      url: `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(exe)}`,
+      // GitHub stores uploaded assets with spaces turned into dots ("Keito Notch_…" → "Keito.Notch_…").
+      url: `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(exe.replace(/ /g, "."))}`,
     },
   },
 };

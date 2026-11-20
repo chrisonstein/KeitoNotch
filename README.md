@@ -16,7 +16,7 @@ Requires macOS 14 or later.
 
 Keito Notch is also available for Windows 10 and 11 (source in [`windows/`](windows/)).
 
-1. Download the latest **Keito Notch_x.y.z_x64-setup.exe** from the [Windows releases](https://github.com/chrisonstein/KeitoNotch/releases?q=win-v) (tags starting with `win-v`).
+1. Download the latest **Keito.Notch_x.y.z_x64-setup.exe** from the [Windows releases](https://github.com/chrisonstein/KeitoNotch/releases?q=win-v) (tags starting with `win-v`).
 2. Run it. No administrator rights are needed. The first time, Windows SmartScreen may warn because the installer isn't code-signed yet: choose **More info → Run anyway**.
 3. Keito Notch opens its Settings: add your Keito Company ID and API key.
 
