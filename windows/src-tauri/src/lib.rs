@@ -183,7 +183,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "day" => toggle_day(app),
             "new" => emit_notch(app, "new-entry"),
             "settings" => {
-                let _ = open_settings_window(app, None);
+                // Not inline: building a webview window inside an event handler deadlocks WebView2
+                // on Windows, like a sync command does (see open_settings). A worker thread is safe.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = open_settings_window(&app, None);
+                });
             }
             "quit" => app.exit(0),
             _ => {}
