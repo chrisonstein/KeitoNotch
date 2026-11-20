@@ -35,6 +35,9 @@ const SECTIONS: { id: Section; label: string; icon: ReactNode }[] = [
   { id: "general", label: "General", icon: <Power /> },
 ];
 
+/** Where you create a Keito API key. Keito's docs give no deep link, so this opens the app. */
+const KEITO_API_KEYS_URL = "https://app.keito.ai/";
+
 /** Tell the notch something changed (credentials = reload data too). */
 const changed = (credentials: boolean) => void emit("settings-changed", { credentials });
 
@@ -176,7 +179,11 @@ function KeitoSection({ prefs }: { prefs: Prefs }) {
     <>
       <h1>Keito</h1>
       <p className="lead">
-        Create an API key in Keito under <b>Settings → API keys</b> with <i>All permitted operations</i>, and copy your Company ID from the same page.
+        Create an API key in{" "}
+        <a href="#" onClick={(e) => { e.preventDefault(); void openExternal(KEITO_API_KEYS_URL); }}>
+          Keito → Settings → API keys
+        </a>{" "}
+        with <i>All permitted operations</i>, and copy your Company ID from the same page.
         The key is stored in Windows Credential Manager, never in a file.
       </p>
       <div className="group">
