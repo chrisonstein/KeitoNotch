@@ -8,6 +8,9 @@ name: Windows build
 on:
   workflow_dispatch:
   push:
+    # Branch pushes build when windows/ changes; tags win-v* always build and release.
+    # (Listing only tags would skip branch pushes entirely.)
+    branches: [main]
     paths: ["windows/**", ".github/workflows/windows.yml"]
     tags: ["win-v*"]
 
