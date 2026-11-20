@@ -419,7 +419,7 @@ export function NotchApp() {
     >
       {morphing && (
         <div className={`morph-layer ${grown ? "faded" : ""}`} style={layer(tabSize)}>
-          <Tab nav={nav} island={style === "island"} drag={dragHandlers} />
+          <Tab nav={nav} island={style === "island"} drag={dragHandlers} quiet={grown} />
         </div>
       )}
       {morphing && mode === "peek" && (
@@ -445,7 +445,7 @@ function stopOrResumeLast(requestResume: (e: TimeEntry) => void) {
 }
 
 /** Ring with ■ (stop) or + (new entry) in the middle; always clickable. */
-function RingButton({ size, onNewEntry }: { size: number; onNewEntry: () => void }) {
+function RingButton({ size, onNewEntry, quiet = false }: { size: number; onNewEntry: () => void; quiet?: boolean }) {
   const s = useStore();
   const running = !!s.running;
   const target = s.target(new Date());
@@ -457,7 +457,7 @@ function RingButton({ size, onNewEntry }: { size: number; onNewEntry: () => void
       className="ring-btn"
       style={{ width: size, height: size }}
       disabled={s.isBusy}
-      title={`Today ${fmt.short(s.todaySeconds)} of ${fmt.short(target)} · ${label}`}
+      title={quiet ? undefined : `Today ${fmt.short(s.todaySeconds)} of ${fmt.short(target)} · ${label}`}
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation();
@@ -478,13 +478,17 @@ function RingButton({ size, onNewEntry }: { size: number; onNewEntry: () => void
 }
 
 /** Collapsed: ring + timer, stacked (edge) or side by side (island). Click opens the day view; drag moves it. */
-function Tab({ nav, island, drag }: { nav: Nav; island: boolean; drag: DragHandlers }) {
+/**
+ * `quiet`: the tab is faded out under the grown peek card. It stays mounted for the crossfade, but must
+ * not show its tooltips: the pointer rests on it, and Windows would pop them up over the card (filmed).
+ */
+function Tab({ nav, island, drag, quiet = false }: { nav: Nav; island: boolean; drag: DragHandlers; quiet?: boolean }) {
   const s = useStore();
   return (
     <div
       className={`tab ${island ? "row-tab" : ""}`}
       role="button"
-      title="Click for the day view · drag to move · right-click for settings"
+      title={quiet ? undefined : "Click for the day view · drag to move · right-click for settings"}
       aria-label={s.running ? `Timer running for ${s.projectName(s.running)}. Open day view` : "No timer running. Open day view"}
       onClick={() => nav.set("day")}
       onContextMenu={(e) => {
@@ -493,7 +497,7 @@ function Tab({ nav, island, drag }: { nav: Nav; island: boolean; drag: DragHandl
       }}
       {...drag}
     >
-      <RingButton size={island ? 26 : 34} onNewEntry={() => nav.openForm({ date: new Date() })} />
+      <RingButton size={island ? 26 : 34} onNewEntry={() => nav.openForm({ date: new Date() })} quiet={quiet} />
       <span className="time num">
         {s.running ? fmt.timer(s.elapsed, s.prefs.showSeconds) : <span className="muted">–</span>}
       </span>
