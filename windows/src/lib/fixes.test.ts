@@ -3,6 +3,42 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("./native", () => ({ http: vi.fn(), native: {}, openExternal: vi.fn(), secrets: { get: vi.fn(), set: vi.fn() } }));
 
 import { idleStep, IDLE_LIMIT_SECS, type IdleState } from "./idle";
+import { APIError, friendlyError } from "./keito";
+
+describe("server error reasons", () => {
+  // Body shape from https://keito.ai/docs/api-reference/error-handling (read 2026-11-20).
+  it("shows Keito's error_description", () => {
+    const e = new APIError(400, JSON.stringify({ error: "bad request", error_description: "Notes are required for this project" }));
+    expect(friendlyError(e)).toBe("Notes are required for this project (400)");
+  });
+
+  it("shows a plain message field", () => {
+    const e = new APIError(422, JSON.stringify({ message: "Time entries in an approved week cannot be changed" }));
+    expect(friendlyError(e)).toBe("Time entries in an approved week cannot be changed (422)");
+  });
+
+  it("shows Jira's errorMessages", () => {
+    const e = new APIError(400, JSON.stringify({ errorMessages: ["The value 'X' does not exist for the field 'project'."], errors: {} }));
+    expect(friendlyError(e)).toBe("The value 'X' does not exist for the field 'project'. (400)");
+  });
+
+  it("explains a 409 conflict without dumping JSON", () => {
+    const e = new APIError(409, JSON.stringify({ error: "conflict", error_description: "Approved time entries cannot be deleted" }));
+    expect(friendlyError(e)).toBe("Approved time entries cannot be deleted (409)");
+  });
+
+  it("keeps the timer-conflict text", () => {
+    expect(friendlyError(new APIError(409, "{}", "Another timer is already running."))).toBe("Another timer is already running.");
+  });
+
+  it("falls back to the status when the body says nothing useful", () => {
+    expect(friendlyError(new APIError(500, "<html>oops</html>"))).toBe("The server answered with error 500.");
+  });
+
+  it("keeps the setup hints for 401", () => {
+    expect(friendlyError(new APIError(401, JSON.stringify({ error: "unauthorized" })))).toMatch(/rejected \(401\)/);
+  });
+});
 
 const T0 = new Date(2026, 10, 20, 12, 0, 0).getTime();
 const min = 60_000;
