@@ -419,7 +419,7 @@ export function NotchApp() {
     >
       {morphing && (
         <div className={`morph-layer ${grown ? "faded" : ""}`} style={layer(tabSize)}>
-          <Tab nav={nav} island={style === "island"} drag={dragHandlers} quiet={grown} />
+          <Tab nav={nav} island={style === "island"} drag={dragHandlers} quiet={s.prefs.expandOnHover} />
         </div>
       )}
       {morphing && mode === "peek" && (
@@ -479,8 +479,9 @@ function RingButton({ size, onNewEntry, quiet = false }: { size: number; onNewEn
 
 /** Collapsed: ring + timer, stacked (edge) or side by side (island). Click opens the day view; drag moves it. */
 /**
- * `quiet`: the tab is faded out under the grown peek card. It stays mounted for the crossfade, but must
- * not show its tooltips: the pointer rests on it, and Windows would pop them up over the card (filmed).
+ * `quiet`: no tooltips — used while "Peek on hover" is on. Hovering opens the card after 250 ms, long
+ * before a tooltip would; but Chromium takes the tooltip text when the pointer arrives and shows it ~1 s
+ * later anyway, over the grown card (filmed twice). Removing the title once the card grows is too late.
  */
 function Tab({ nav, island, drag, quiet = false }: { nav: Nav; island: boolean; drag: DragHandlers; quiet?: boolean }) {
   const s = useStore();
