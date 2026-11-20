@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -91,8 +91,7 @@ fn show_toast(app: AppHandle, state: tauri::State<'_, PlacementState>, width: f6
             placement::Rect { x: a.position.x + (a.size.width as i32 - w) / 2, y: a.position.y + a.size.height as i32 - h - (16.0 * s) as i32, w, h }
         }
     };
-    win.set_size(PhysicalSize::new(r.w as u32, r.h as u32)).map_err(|e| e.to_string())?;
-    win.set_position(PhysicalPosition::new(r.x, r.y)).map_err(|e| e.to_string())?;
+    platform::set_bounds(&win, r)?;
     platform::show_without_focus(&win);
     Ok(())
 }

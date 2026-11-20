@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, Runtime};
+use tauri::{AppHandle, Manager, Monitor, Runtime};
 
 use crate::platform;
 
@@ -160,8 +160,7 @@ pub fn place_notch(app: AppHandle, state: tauri::State<'_, PlacementState>, args
     let screen = rect_screen(&monitor);
     let work = rect_work(&monitor);
     let r = compute(&args, screen, work, scale);
-    win.set_size(PhysicalSize::new(r.w as u32, r.h as u32)).map_err(|e| e.to_string())?;
-    win.set_position(PhysicalPosition::new(r.x, r.y)).map_err(|e| e.to_string())?;
+    platform::set_bounds(&win, r)?;
     let name = name_of(&monitor);
     *state.0.lock().map_err(|e| e.to_string())? = Placement { monitor: name.clone(), notch: r, screen, work, scale };
     Ok(name)
