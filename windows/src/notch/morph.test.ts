@@ -8,7 +8,24 @@ vi.mock("@tauri-apps/api/webview", () => ({ getCurrentWebview: () => ({ setZoom:
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
 
-import { MORPH_MS, morphAnchor, sizeFor } from "./NotchApp";
+import { MORPH_MS, hitRect, morphAnchor, sizeFor } from "./NotchApp";
+
+describe("clip to the tab inside the card-sized window", () => {
+  const card = { w: 340, h: 84 };
+  const tab = { w: 112, h: 44 };
+  it("top right: the tab is in the top-right corner", () => {
+    expect(hitRect(morphAnchor("island", "right", "topRight"), card, tab)).toEqual({ x: 228, y: 0, w: 112, h: 44 });
+  });
+  it("bottom left: the tab is in the bottom-left corner", () => {
+    expect(hitRect(morphAnchor("island", "right", "bottomLeft"), card, tab)).toEqual({ x: 0, y: 40, w: 112, h: 44 });
+  });
+  it("top centre: the tab is centred", () => {
+    expect(hitRect(morphAnchor("island", "right", "top"), card, tab)).toEqual({ x: 114, y: 0, w: 112, h: 44 });
+  });
+  it("edge right: the tab hugs the right edge", () => {
+    expect(hitRect(morphAnchor("edge", "right", "top"), { w: 316, h: 96 }, { w: 50, h: 96 })).toEqual({ x: 266, y: 0, w: 50, h: 96 });
+  });
+});
 
 describe("hover morph", () => {
   it.each([

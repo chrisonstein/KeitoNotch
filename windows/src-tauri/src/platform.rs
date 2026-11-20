@@ -59,6 +59,36 @@ pub fn set_bounds(win: &WebviewWindow, r: crate::placement::Rect) -> Result<(), 
     Ok(())
 }
 
+/// Clips the window to `r` (physical px, relative to the window), or removes the clip with None.
+/// Outside the region Windows neither draws the window nor sends it the mouse: clicks fall through to
+/// whatever is underneath. That lets the notch keep the peek card's size while showing only the tab,
+/// so hovering never resizes the window (a resize makes WebView2 show its old frame for a moment).
+#[cfg(windows)]
+pub fn set_hit_region(win: &WebviewWindow, r: Option<crate::placement::Rect>) -> Result<(), String> {
+    use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject, SetWindowRgn};
+    let hwnd = win.hwnd().map_err(|e| e.to_string())?;
+    // SAFETY: plain GDI calls on a live window owned by this process. After a successful SetWindowRgn
+    // the system owns the region; on failure we delete it ourselves.
+    unsafe {
+        let rgn = match r {
+            Some(r) => CreateRectRgn(r.x, r.y, r.x + r.w, r.y + r.h),
+            None => std::ptr::null_mut(),
+        };
+        if SetWindowRgn(hwnd.0 as _, rgn, 1) == 0 {
+            if !rgn.is_null() {
+                DeleteObject(rgn);
+            }
+            return Err("SetWindowRgn failed".into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn set_hit_region(_win: &WebviewWindow, _r: Option<crate::placement::Rect>) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(not(windows))]
 pub fn set_bounds(win: &WebviewWindow, r: crate::placement::Rect) -> Result<(), String> {
     use tauri::{PhysicalPosition, PhysicalSize};

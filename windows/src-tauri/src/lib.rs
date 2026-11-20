@@ -69,6 +69,14 @@ fn show_notch(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Shows (and lets you click) only `rect` of the notch window — physical px from its top-left — or all of
+/// it with None. The hover morph keeps the window at the card's size and clips it to the tab.
+#[tauri::command]
+fn set_hit_region(app: AppHandle, rect: Option<placement::Rect>) -> Result<(), String> {
+    let win = app.get_webview_window("notch").ok_or("no notch window")?;
+    platform::set_hit_region(&win, rect)
+}
+
 /// Hides the notch (tray style while closed, or tucked away next to a full-screen app).
 #[tauri::command]
 fn hide_notch(app: AppHandle) -> Result<(), String> {
@@ -230,6 +238,7 @@ pub fn run() {
             placement::screen_state,
             show_notch,
             hide_notch,
+            set_hit_region,
             show_toast,
             hide_toast,
             open_settings,

@@ -63,6 +63,16 @@ export function morphAnchor(style: NotchStyle, edge: string, island: IslandPos):
   return { x, y: island.startsWith("bottom") ? "bottom" : "top" };
 }
 
+/** Where a box of `box` size sits inside a window of `win` size against an anchor (CSS px). */
+export function hitRect(a: ReturnType<typeof morphAnchor>, win: { w: number; h: number }, box: { w: number; h: number }) {
+  return {
+    x: a.x === "left" ? 0 : a.x === "right" ? win.w - box.w : (win.w - box.w) / 2,
+    y: a.y === "top" ? 0 : win.h - box.h,
+    w: box.w,
+    h: box.h,
+  };
+}
+
 /** Absolute position (CSS) for a box of w×h against an anchor. */
 function anchored(a: ReturnType<typeof morphAnchor>, w: number, h: number): CSSProperties {
   return {
@@ -207,7 +217,12 @@ export function NotchApp() {
   const visible = style === "tray" ? open : open || mode === "peek" || !tucked;
   const zoom = textSize === "larger" ? 1.3 : textSize === "large" ? 1.15 : 1;
   const wideTab = s.prefs.showSeconds && !!s.running;
-  const size = sizeFor(mode, style, wideTab);
+  // Tab and peek share one card-sized window and one surface that changes size in CSS (the morph).
+  const morphMode = style !== "tray" && (mode === "collapsed" || mode === "peek");
+  const anchor = morphAnchor(style, edge, island);
+  const tabSize = sizeFor("collapsed", style, wideTab);
+  const peekSize = sizeFor("peek", style, wideTab);
+  const size = morphMode ? peekSize : sizeFor(mode, style, wideTab);
   const w = Math.round(size.w * zoom);
   const h = Math.round(size.h * zoom);
 
@@ -224,13 +239,6 @@ export function NotchApp() {
       currentMonitor.current = monitor;
       await native.showNotch();
       if (isOpen(modeRef.current)) void getCurrentWindow().setFocus();
-      // Hover morph: the window is now peek-sized with the tab still drawn in its corner. Grow the card
-      // once WebView2 has laid out the new size (two frames), so the resize itself is never visible.
-      if (modeRef.current === "peek") {
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          if (!cancelled && modeRef.current === "peek") setGrown(true);
-        }));
-      }
     })();
     return () => {
       cancelled = true;
@@ -241,6 +249,42 @@ export function NotchApp() {
   useEffect(() => {
     if (mode !== "peek") setGrown(false);
   }, [mode]);
+
+  // Hover morph without resizing: in tab and peek mode the window keeps the card's size. Collapsed, it is
+  // clipped to the tab (clicks beside it fall through); on hover the clip goes and the card grows in CSS.
+  // Runs after the placement effect above, so the main thread places the window before clipping it.
+  const [dprTick, setDprTick] = useState(0);
+  useEffect(() => {
+    const onResize = () => setDprTick((t) => t + 1);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  useEffect(() => {
+    if (!morphMode) {
+      void native.setHitRegion(null).catch(() => undefined);
+      return;
+    }
+    if (mode === "peek") {
+      let live = true;
+      void native.setHitRegion(null)
+        .catch(() => undefined)
+        .then(() => requestAnimationFrame(() => {
+          if (live && modeRef.current === "peek") setGrown(true);
+        }));
+      return () => {
+        live = false;
+      };
+    }
+    const r = hitRect(anchor, peekSize, tabSize);
+    const dpr = window.devicePixelRatio || 1;
+    void native.setHitRegion({
+      x: Math.floor(r.x * dpr),
+      y: Math.floor(r.y * dpr),
+      w: Math.ceil(r.w * dpr),
+      h: Math.ceil(r.h * dpr),
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, morphMode, anchor.x, anchor.y, tabSize.w, tabSize.h, peekSize.w, peekSize.h, dprTick]);
 
   // Twice a second: follow the pointer's display, tuck away next to full-screen apps.
   useEffect(() => {
@@ -360,11 +404,8 @@ export function NotchApp() {
   };
 
   const shape = style === "edge" ? `edge-${edge}` : style === "island" ? `island ${island.startsWith("bottom") ? "from-bottom" : "from-top"}` : "tray";
-  // Tab and peek share one surface that changes size in CSS (the morph); other modes fill the window.
-  const morphing = style !== "tray" && (mode === "collapsed" || mode === "peek");
-  const anchor = morphAnchor(style, edge, island);
-  const tabSize = sizeFor("collapsed", style, wideTab);
-  const peekSize = sizeFor("peek", style, wideTab);
+  // Tab and peek: one surface that changes size in CSS (the morph); other modes fill the window.
+  const morphing = morphMode;
   const surface = grown ? peekSize : tabSize;
   // Layers sit inside the 1 px border.
   const layer = (sz: { w: number; h: number }) => anchored(anchor, sz.w - 2, sz.h - 2);

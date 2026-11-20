@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, Monitor, Runtime};
 use crate::platform;
 
 /// A rectangle in physical pixels.
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Deserialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
