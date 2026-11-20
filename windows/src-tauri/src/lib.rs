@@ -105,8 +105,10 @@ fn hide_toast(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Must stay `async`: a sync command runs on the main thread, and creating a webview window there
+/// deadlocks WebView2 on Windows — the window appears but stays blank (wry#583, Tauri docs).
 #[tauri::command]
-fn open_settings(app: AppHandle, section: Option<String>) -> Result<(), String> {
+async fn open_settings(app: AppHandle, section: Option<String>) -> Result<(), String> {
     open_settings_window(&app, section.as_deref())
 }
 
