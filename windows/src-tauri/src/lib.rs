@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -69,6 +69,14 @@ fn show_notch(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Shows (and lets you click) only `rect` of the notch window — physical px from its top-left — or all of
+/// it with None. The hover morph keeps the window at the card's size and clips it to the tab.
+#[tauri::command]
+fn set_hit_region(app: AppHandle, rect: Option<placement::Rect>) -> Result<(), String> {
+    let win = app.get_webview_window("notch").ok_or("no notch window")?;
+    platform::set_hit_region(&win, rect)
+}
+
 /// Hides the notch (tray style while closed, or tucked away next to a full-screen app).
 #[tauri::command]
 fn hide_notch(app: AppHandle) -> Result<(), String> {
@@ -91,8 +99,7 @@ fn show_toast(app: AppHandle, state: tauri::State<'_, PlacementState>, width: f6
             placement::Rect { x: a.position.x + (a.size.width as i32 - w) / 2, y: a.position.y + a.size.height as i32 - h - (16.0 * s) as i32, w, h }
         }
     };
-    win.set_size(PhysicalSize::new(r.w as u32, r.h as u32)).map_err(|e| e.to_string())?;
-    win.set_position(PhysicalPosition::new(r.x, r.y)).map_err(|e| e.to_string())?;
+    platform::set_bounds(&win, r)?;
     platform::show_without_focus(&win);
     Ok(())
 }
@@ -105,8 +112,10 @@ fn hide_toast(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Must stay `async`: a sync command runs on the main thread, and creating a webview window there
+/// deadlocks WebView2 on Windows — the window appears but stays blank (wry#583, Tauri docs).
 #[tauri::command]
-fn open_settings(app: AppHandle, section: Option<String>) -> Result<(), String> {
+async fn open_settings(app: AppHandle, section: Option<String>) -> Result<(), String> {
     open_settings_window(&app, section.as_deref())
 }
 
@@ -181,7 +190,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             "day" => toggle_day(app),
             "new" => emit_notch(app, "new-entry"),
             "settings" => {
-                let _ = open_settings_window(app, None);
+                // Not inline: building a webview window inside an event handler deadlocks WebView2
+                // on Windows, like a sync command does (see open_settings). A worker thread is safe.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = open_settings_window(&app, None);
+                });
             }
             "quit" => app.exit(0),
             _ => {}
@@ -224,6 +238,7 @@ pub fn run() {
             placement::screen_state,
             show_notch,
             hide_notch,
+            set_hit_region,
             show_toast,
             hide_toast,
             open_settings,

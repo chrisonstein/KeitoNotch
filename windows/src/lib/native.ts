@@ -49,6 +49,8 @@ export const native = {
   screenState: (style: string, edge: string, island: string) => invoke<ScreenState>("screen_state", { style, edge, island }),
   showNotch: () => invoke<void>("show_notch"),
   hideNotch: () => invoke<void>("hide_notch"),
+  /** Clip the notch window to a rectangle (physical px from its top-left); null shows all of it. */
+  setHitRegion: (rect: { x: number; y: number; w: number; h: number } | null) => invoke<void>("set_hit_region", { rect }),
   showToast: (width: number, height: number) => invoke<void>("show_toast", { width, height }),
   hideToast: () => invoke<void>("hide_toast"),
   openSettings: (section?: string) => invoke<void>("open_settings", { section: section ?? null }),

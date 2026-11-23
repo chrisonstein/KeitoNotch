@@ -6,6 +6,7 @@ import { KeitoClient, friendlyError } from "./keito";
 import { JiraClient } from "./jira";
 import { CalendarProblem, GoogleAuth, GoogleCalendarClient, NotSignedIn, dedupeKey } from "./google";
 import { matchEvent, type Match } from "./matcher";
+import { idleStep } from "./idle";
 import { native } from "./native";
 import { hasGoogleClient, hasJira, hasKeito, loadCredentials, loadPrefs, savePrefs, type Credentials, type Favorite, type Prefs } from "./prefs";
 import * as targets from "./targets";
@@ -60,6 +61,9 @@ const EMPTY_CREDS: Credentials = {
   keitoAccountId: "", keitoApiKey: "", jiraHost: "", jiraEmail: "", jiraToken: "", googleClientId: "", googleClientSecret: "",
 };
 
+/** How long a day's calendar events are reused before loading them again. */
+const CALENDAR_FRESH_MS = 5 * 60_000;
+
 export class AppStore {
   // Data
   creds: Credentials = EMPTY_CREDS;
@@ -86,6 +90,8 @@ export class AppStore {
   calendarLoading = false;
   calendarList: CalendarInfo[] = [];
   calendarError: CalendarProblem | null = null;
+  /** When each day's events were last loaded without errors; a failed load is never cached. */
+  private calendarLoadedAt: Record<string, number> = {};
   private matchHistory: TimeEntry[] = [];
   private historyLoadedAt = 0;
   private googleAuthStore: GoogleAuth | null = null;
@@ -324,7 +330,7 @@ export class AppStore {
     this.user = null;
     this.projects = [];
     this.taskCache.clear();
-    this.calendarEvents = {};
+    this.clearCalendarCache();
     this.notify();
 
     this.tickTimer = window.setInterval(() => {
@@ -339,8 +345,21 @@ export class AppStore {
 
   /** Preferences changed in another window (no credential change). */
   reloadPrefs() {
+    const before = this.prefs;
     this.prefs = loadPrefs();
+    // Other calendars chosen (or the calendar switched off/on): what was loaded no longer applies.
+    if (
+      before.calendarEnabled !== this.prefs.calendarEnabled ||
+      JSON.stringify(before.googleCalendarIds) !== JSON.stringify(this.prefs.googleCalendarIds)
+    ) {
+      this.clearCalendarCache();
+    }
     this.notify();
+  }
+
+  private clearCalendarCache() {
+    this.calendarEvents = {};
+    this.calendarLoadedAt = {};
   }
 
   private async bootstrap() {
@@ -672,7 +691,9 @@ export class AppStore {
     const auth = this.googleAuth;
     if (!this.calendarConnected || !auth) return;
     const key = dayKey(day);
-    if (!force && this.calendarEvents[key]) return;
+    // Reuse a good load for a few minutes; a meeting planned meanwhile shows up after that.
+    const loadedAt = this.calendarLoadedAt[key];
+    if (!force && loadedAt !== undefined && Date.now() - loadedAt < CALENDAR_FRESH_MS) return;
     this.calendarLoading = true;
     this.notify();
     const history = this.loadMatchHistory();
@@ -700,6 +721,8 @@ export class AppStore {
       ...this.calendarEvents,
       [key]: merged.filter((e) => !seen.has(dedupeKey(e)) && !!seen.add(dedupeKey(e))).sort((a, b) => +a.start - +b.start),
     };
+    if (problem) delete this.calendarLoadedAt[key];
+    else this.calendarLoadedAt[key] = Date.now();
     this.calendarError = problem;
     this.calendarLoading = false;
     this.notify();
@@ -733,17 +756,20 @@ export class AppStore {
   private async checkIdle() {
     if (!this.prefs.idleReminder || !this.running || this.idlePrompt) {
       this.idleSince = null;
+      // No previous check: the next timer must not mistake this quiet time for sleep.
+      this.idleCheckAt = 0;
       return;
     }
     // Every 5 s is plenty.
-    if (Date.now() - this.idleCheckAt < 5000) return;
-    this.idleCheckAt = Date.now();
+    const now = Date.now();
+    if (now - this.idleCheckAt < 5000) return;
+    const lastCheckAt = this.idleCheckAt;
+    this.idleCheckAt = now;
     const idle = await native.idleSeconds().catch(() => 0);
-    if (idle >= 600) {
-      this.idleSince ??= new Date(Date.now() - idle * 1000);
-    } else if (this.idleSince && idle < 10) {
-      this.idlePrompt = { start: this.idleSince, end: new Date(Date.now() - idle * 1000) };
-      this.idleSince = null;
+    const r = idleStep({ since: this.idleSince, lastCheckAt }, now, idle);
+    this.idleSince = r.since;
+    if (r.prompt) {
+      this.idlePrompt = r.prompt;
       this.notify();
       this.onIdleReturn?.();
     }
