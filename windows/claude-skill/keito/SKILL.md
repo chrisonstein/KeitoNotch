@@ -46,3 +46,10 @@ One JSON line: `{"ok":true|false,"message":"…",…}`.
 - Confirm a `log` on another day than today in your reply (the date is in the message).
 - `status` shows client names: fine in the user's own session; don't paste it into anything that leaves the machine.
 - This only works on the Windows PC where Keito Notch runs; elsewhere the command isn't there (exit 2).
+
+## Where this skill lives
+
+It's a link (junction) to the copy installed with the app, `%LOCALAPPDATA%\Keito Notch\claude-skill`, so it
+updates with the app. If it's gone (the link was removed), put it back with
+`keito.ps1 install-skill` (all sessions: `~/.claude/skills`) or `keito.ps1 install-skill -SkillsDir
+<folder>\.claude\skills` (only sessions started under that folder).

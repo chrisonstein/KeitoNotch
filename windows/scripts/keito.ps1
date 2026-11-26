@@ -20,6 +20,7 @@
   keito.ps1 log -Project "Rollout" -Task "Development" -Duration 1h30
   keito.ps1 stop
   keito.ps1 install-skill
+  keito.ps1 install-skill -SkillsDir C:\work\.claude\skills
 #>
 [CmdletBinding()]
 param(
@@ -37,6 +38,8 @@ param(
   [string]$Project,
   [string]$Task,
   [int]$TimeoutSec = 30,
+  # install-skill: the skills folder to link into (default ~/.claude/skills).
+  [string]$SkillsDir,
   # Print the request instead of sending it.
   [switch]$DryRun
 )
@@ -52,14 +55,23 @@ function Out-Reply([hashtable]$Reply, [int]$Code) {
 }
 
 if ($Command -eq 'install-skill') {
-  # Claude Code picks up skills from ~/.claude/skills/<name>/SKILL.md.
-  $source = Join-Path $PSScriptRoot 'claude-skill\SKILL.md'
-  if (-not (Test-Path $source)) { $source = Join-Path $PSScriptRoot '..\claude-skill\keito\SKILL.md' }
-  if (-not (Test-Path $source)) { Out-Reply @{ ok = $false; message = "SKILL.md not found next to $PSCommandPath" } 1 }
-  $target = Join-Path $HOME '.claude\skills\keito'
-  New-Item -ItemType Directory -Force -Path $target | Out-Null
-  Copy-Item -Force $source (Join-Path $target 'SKILL.md')
-  Out-Reply @{ ok = $true; message = "Skill installed in $target; new Claude Code sessions know 'keito'" } 0
+  # Claude Code reads skills from <dir>/<name>/SKILL.md: ~/.claude/skills for every session, or a project's
+  # .claude/skills (-SkillsDir) for the sessions started under that folder. A junction (no admin rights
+  # needed, unlike a symlink) to the copy installed with the app, so the skill updates with the app.
+  $source = Join-Path $PSScriptRoot 'claude-skill'
+  if (-not (Test-Path (Join-Path $source 'SKILL.md'))) { $source = Join-Path $PSScriptRoot '..\claude-skill\keito' }
+  if (-not (Test-Path (Join-Path $source 'SKILL.md'))) { Out-Reply @{ ok = $false; message = "SKILL.md not found next to $PSCommandPath" } 1 }
+  $dir = if ($SkillsDir) { $SkillsDir } else { Join-Path $HOME '.claude\skills' }
+  $target = Join-Path $dir 'keito'
+  if (Test-Path $target) {
+    $item = Get-Item -Force $target
+    if ($item.LinkType -ne 'Junction') { Out-Reply @{ ok = $false; message = "$target already exists and isn't a link; leaving it alone" } 1 }
+    $item.Delete()
+  }
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $source = (Resolve-Path $source).Path
+  New-Item -ItemType Junction -Path $target -Target $source | Out-Null
+  Out-Reply @{ ok = $true; message = "Skill linked: $target -> $source. New Claude Code sessions there know 'keito'." } 0
 }
 
 $id = [guid]::NewGuid().ToString('D').ToLowerInvariant()

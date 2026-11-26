@@ -59,8 +59,8 @@ pwsh -NoProfile -File "$env:LOCALAPPDATA\Keito Notch\keito.ps1" stop
 
 It prints one JSON line; exit 0 = done, 1 = refused (the message says why; it never guesses a project or
 task — pass `-Project`/`-Task`), 2 = no answer (outcome unknown: check `status` before repeating a `log`).
-`keito.ps1 install-skill` copies a Claude Code skill (`claude-skill/keito/SKILL.md`) to `~/.claude/skills/keito`,
-so Claude knows the commands. How it works: `keito-notch.exe --remote <base64url JSON>` reaches the running
+`keito.ps1 install-skill [-SkillsDir <dir>]` links a Claude Code skill (`claude-skill/keito/SKILL.md`, installed
+with the app) into `~/.claude/skills/keito` (or `<dir>/keito`) with a junction, so Claude knows the commands. How it works: `keito-notch.exe --remote <base64url JSON>` reaches the running
 app through the single-instance plugin (`src-tauri/src/remote.rs`), the notch runs it one at a time once its
 data is loaded (`src/lib/remote.ts`, `remoteBridge.ts`) and answers in
 `%LOCALAPPDATA%\ai.keito.notch\remote\<uuid>.json`. No network port.
