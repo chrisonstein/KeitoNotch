@@ -26,6 +26,10 @@ Everything from the Mac app, except Apple Calendar (Windows uses Google Calendar
 
 Keys: `N` new entry, `S` stop / resume last, `C` from calendar, `Esc` back, `Ctrl+Enter` save.
 
+Windows sometimes leaves the always-on-top notch *below* ordinary windows (it keeps `WS_EX_TOPMOST` but sits
+under e.g. a maximised terminal, so the tab is invisible and can't be clicked). `platform::keep_on_top` checks
+this twice a second and on every show, and puts it back; the first few times per run are logged.
+
 ## Layout
 
 ```
