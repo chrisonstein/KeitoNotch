@@ -6,6 +6,8 @@
   Hands the command to the running app (keito-notch.exe --remote ...), which books it with the same ticket
   rules as its form (same ticket as before -> same project; your ticket rules from Settings -> Jira, e.g.
   CSD -> Service Desk with the customer as task) and shows the usual toast with Undo. Prints one JSON line: {"ok":..,"message":..,...}.
+  'start' stops a running timer (the message names it). When a ruled ticket's customer doesn't settle the task,
+  the refusal names Jira's customer and the closest tasks; pass -Task and the app remembers it for that customer.
 
   Exit codes: 0 done · 1 refused (the message says why; nothing was booked) · 2 no answer from the app
   (outcome unknown: run 'status' before trying again, don't just repeat a 'log').

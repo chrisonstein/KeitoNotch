@@ -5,6 +5,7 @@ import type { AppStore, EntryInput } from "./store";
 import type { JiraIssue, Project, TaskItem, TimeEntry } from "./models";
 import { keyFromLink, looksLikeKey } from "./jira";
 import { addDays, dayKey, fromKey } from "./dates";
+import type { CustomerMatch } from "./ticketRules";
 
 export type Verb = "status" | "start" | "log" | "stop";
 const VERBS: Verb[] = ["status", "start", "log", "stop"];
@@ -119,11 +120,10 @@ export function pickByName<T>(items: T[], query: string, label: (t: T) => string
   const words = q.split(/\s+/).filter(Boolean);
   const hits = items.filter((t) => words.every((w) => label(t).toLowerCase().includes(w)));
   if (hits.length === 1) return { item: hits[0] };
-  const shown = (hits.length ? hits : items).slice(0, 10).map(label);
   return {
     error: hits.length
-      ? `More than one ${what} matches "${query}": ${shown.join(", ")}${hits.length > 10 ? ", …" : ""}`
-      : `No ${what} matches "${query}"`,
+      ? `More than one ${what} matches "${query}": ${hits.map(label).join(", ")}`
+      : `No ${what} matches "${query}". Options: ${items.map(label).join(", ")}`,
   };
 }
 
@@ -135,6 +135,19 @@ interface Booking {
   issue: JiraIssue | null;
   notes: string;
   reason: string | null;
+  /** The ticket's customer lookup (ruled tickets only). */
+  customer: CustomerMatch | null;
+}
+
+const names = (xs: TaskItem[]) => xs.map((x) => x.name).join(", ");
+const quoted = (xs: string[]) => xs.map((x) => `"${x}"`).join(", ");
+
+/** Why the customer didn't settle the task: what Jira said and what came close. */
+function customerNote(key: string, m: CustomerMatch | null): string {
+  if (!m) return "";
+  if (!m.orgs.length) return `Jira names no customer for ${key} (its Organizations field is empty or can't be read). `;
+  const close = m.candidates.length ? `closest: ${names(m.candidates)}` : "no task has a similar name";
+  return `Jira's customer for ${key} is ${quoted(m.orgs)}; no single task matches it (${close}). `;
 }
 
 /** Project, task and notes for start/log, by the same rules as the form. Refuses rather than guesses. */
@@ -145,6 +158,7 @@ export async function resolveBooking(req: RemoteRequest, s: RemoteStore): Promis
   let project: Project;
   let task: TaskItem | undefined;
   let reason: string | null = null;
+  let customer: CustomerMatch | null = null;
   if (req.project) {
     const p = pickByName(s.projects, req.project, projectLabel, "project");
     if ("error" in p) return p;
@@ -156,7 +170,12 @@ export async function resolveBooking(req: RemoteRequest, s: RemoteStore): Promis
     project = sug.project;
     task = sug.task;
     reason = sug.reason;
-    if (!task && sug.customerTask && !req.task) task = (await s.organizationTask(key, project)).task;
+    // Also with -Task: the app then knows the customer, and remembers the pick for its next ticket.
+    if (!task && sug.customerTask) {
+      customer = await s.organizationTask(key, project);
+      if (!req.task) task = customer.task;
+      if (customer.remembered && !req.task) reason = `${reason} · remembered for ${quoted(customer.orgs)}`;
+    }
   } else {
     return { error: "Give a ticket, or -Project and -Task" };
   }
@@ -171,14 +190,16 @@ export async function resolveBooking(req: RemoteRequest, s: RemoteStore): Promis
   } else if (tasks.length === 1) {
     task = tasks[0];
   } else {
-    const names = tasks.slice(0, 10).map((x) => x.name);
-    return { error: `Which task on ${project.name}? Pass -Task${names.length ? `. Options: ${names.join(", ")}${tasks.length > 10 ? ", …" : ""}` : ""}` };
+    const remember = customer?.orgs.length === 1 ? `; the app remembers it for ${quoted(customer.orgs)}` : "";
+    return {
+      error: `${customerNote(key ?? "", customer)}Which task on ${project.name}? Pass -Task "<name>"${remember}. Options: ${names(tasks)}`,
+    };
   }
 
   const issue = key ? (await s.ticketIssue(key)) ?? { key, summary: "" } : null;
   const notes = req.notes ?? issue?.summary ?? "";
   if (s.requireNotes && !notes.trim()) return { error: "Keito requires notes for this entry: pass -Notes" };
-  return { project, task, issue, notes, reason };
+  return { project, task, issue, notes, reason, customer };
 }
 
 const minutes = (seconds: number) => Math.round(seconds / 60);
@@ -237,6 +258,8 @@ export async function runRemote(req: RemoteRequest, s: RemoteStore, now = new Da
         if (!date) return fail(`"${req.date}" is not a date: use YYYY-MM-DD, today or yesterday`);
         const b = await resolveBooking(req, s);
         if ("error" in b) return fail(b.error);
+        // Starting a timer stops the running one (Keito's replace_running): say which.
+        const running = s.running ? s.projectName(s.running) : null;
         const input: EntryInput = {
           project: b.project,
           task: b.task,
@@ -250,14 +273,18 @@ export async function runRemote(req: RemoteRequest, s: RemoteStore, now = new Da
         };
         if (!(await s.submit(input))) return fail(s.lastError ?? "Keito refused the entry");
         const what = hours === null ? "Timer started on" : `Logged ${Math.round(hours * 60)} min on`;
+        // A pick for a one-customer ruled ticket is what the next ticket of that customer gets (store.learnCustomerTask).
+        const learned = req.task && b.customer?.orgs.length === 1 ? ` Next tickets of ${quoted(b.customer.orgs)} go to ${b.task.name} too.` : "";
+        const stopped = hours === null && running ? ` Stopped ${running}.` : "";
         return {
           id: req.id,
           ok: true,
-          message: `${what} ${where(b)}${hours === null ? "" : ` (${dayKey(date)})`}. Undo in the notch.`,
+          message: `${what} ${where(b)}${hours === null ? "" : ` (${dayKey(date)})`}.${stopped}${learned} Undo in the notch.`,
           project: b.project.name,
           task: b.task.name,
           ticket: b.issue?.key ?? null,
           reason: b.reason,
+          customer: b.customer?.orgs ?? null,
         };
       }
     }

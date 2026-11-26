@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decodeRequest, parseDate, parseDuration, runRemote, type RemoteRequest, type RemoteStore } from "./remote";
 import type { EntryInput } from "./store";
 import type { Project, TaskItem, TimeEntry } from "./models";
-import type { TicketSuggestion } from "./ticketRules";
+import type { CustomerMatch, TicketSuggestion } from "./ticketRules";
 
 const ID = "3f2a9c1e-0b4d-4e8f-9a6b-1c2d3e4f5a6b";
 const b64 = (o: unknown) =>
@@ -51,7 +51,7 @@ const rollout: Project = { id: "ro", name: "Rollout", client: { id: "a", name: "
 const sdTasks: TaskItem[] = [{ id: "t-acme", name: "Acme" }, { id: "t-globex", name: "Globex" }];
 const roTasks: TaskItem[] = [{ id: "t-dev", name: "Development", billable: false }];
 
-function fakeStore(over: Partial<RemoteStore> & { suggestions?: Record<string, TicketSuggestion>; orgTask?: TaskItem } = {}) {
+function fakeStore(over: Partial<RemoteStore> & { suggestions?: Record<string, TicketSuggestion>; orgTask?: TaskItem; match?: Partial<CustomerMatch> } = {}) {
   const submitted: EntryInput[] = [];
   let stops = 0;
   const s = {
@@ -68,7 +68,7 @@ function fakeStore(over: Partial<RemoteStore> & { suggestions?: Record<string, T
     refreshRunning: async () => undefined,
     ensureTicketHistory: async () => undefined,
     ticketSuggestion: (key: string) => over.suggestions?.[key],
-    organizationTask: async () => ({ task: over.orgTask, orgs: over.orgTask ? ["Customer"] : [], candidates: [], remembered: false }),
+    organizationTask: async () => ({ task: over.orgTask, orgs: over.orgTask ? ["Customer"] : [], candidates: [], remembered: false, ...over.match }),
     ticketIssue: async (key: string) => ({ key, summary: `Title of ${key}` }),
     tasksFor: async (p: Project) => (p.id === "sd" ? sdTasks : roTasks),
     submit: async (i: EntryInput) => {
@@ -113,8 +113,54 @@ describe("runRemote: start and log follow the ticket rules", () => {
     const { s, submitted } = fakeStore({ suggestions: { "CSD-8": { project: serviceDesk, fixed: true, customerTask: true, reason: "CSD → Service Desk" } } });
     const r = await runRemote(req({ verb: "start", ticket: "CSD-8" }), s, now);
     expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/Which task on Service Desk\? Pass -Task\. Options: Acme, Globex/);
+    expect(r.message).toMatch(/Jira names no customer for CSD-8 .*Which task on Service Desk\? Pass -Task "<name>"\. Options: Acme, Globex$/);
     expect(submitted).toHaveLength(0);
+  });
+
+  it("Jira's customer without a single match: its name, the look-alikes, every option, and that a pick is remembered", async () => {
+    const many: TaskItem[] = Array.from({ length: 14 }, (_, i) => ({ id: `t${i}`, name: `Customer ${i}` }));
+    const { s } = fakeStore({
+      suggestions: { "CSD-9": { project: serviceDesk, fixed: true, customerTask: true, reason: "CSD → Service Desk" } },
+      tasksFor: async () => many,
+      match: { orgs: ["Initrode-europe"], candidates: [many[3]] },
+    });
+    const r = await runRemote(req({ verb: "start", ticket: "CSD-9" }), s, now);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain(`Jira's customer for CSD-9 is "Initrode-europe"; no single task matches it (closest: Customer 3).`);
+    expect(r.message).toContain(`the app remembers it for "Initrode-europe"`);
+    expect(r.message).toContain("Customer 13"); // no cut-off at 10
+  });
+
+  it("-Task on a ruled ticket still looks up the customer, and says the next ticket follows", async () => {
+    let looked = 0;
+    const { s, submitted } = fakeStore({
+      suggestions: { "CSD-10": { project: serviceDesk, fixed: true, customerTask: true, reason: "CSD → Service Desk" } },
+      organizationTask: async () => {
+        looked++;
+        return { orgs: ["Initrode"], candidates: [], remembered: false };
+      },
+    });
+    const r = await runRemote(req({ verb: "start", ticket: "CSD-10", task: "globex" }), s, now);
+    expect(looked).toBe(1);
+    expect(r).toMatchObject({ ok: true, task: "Globex", customer: ["Initrode"] });
+    expect(r.message).toContain(`Next tickets of "Initrode" go to Globex too.`);
+    expect(submitted[0]).toMatchObject({ task: { id: "t-globex" } });
+  });
+
+  it("start says which running timer it stopped", async () => {
+    const { s } = fakeStore({
+      suggestions: { "CSD-7": { project: serviceDesk, fixed: true, customerTask: true, reason: "CSD → Service Desk" } },
+      orgTask: sdTasks[0],
+      running: { id: "r1", project: { id: "ro", name: "Rollout" } } as TimeEntry,
+    });
+    const r = await runRemote(req({ verb: "start", ticket: "CSD-7" }), s, now);
+    expect(r.message).toContain("Stopped Rollout.");
+  });
+
+  it("a -Task that matches nothing lists every task", async () => {
+    const { s } = fakeStore({ suggestions: { "CSD-7": { project: serviceDesk, fixed: true, customerTask: true, reason: "CSD → Service Desk" } } });
+    const r = await runRemote(req({ verb: "start", ticket: "CSD-7", task: "hooli" }), s, now);
+    expect(r.message).toBe(`No task on Service Desk matches "hooli". Options: Acme, Globex`);
   });
 
   it("an unknown ticket is refused, never guessed", async () => {
