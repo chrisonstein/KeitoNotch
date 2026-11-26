@@ -18,7 +18,7 @@ const entry = (key: string, projectId: string, taskId: string, taskName = "Task"
 });
 
 /** What you'd set in Settings → Jira → Ticket rules for a service desk. */
-const csdRule: TicketRule = { prefix: "CSD", projectId: "sd", projectName: "CS - Service Desk", taskFromCustomer: true };
+const csdRule: TicketRule = { prefix: "CSD", projectId: "sd", projectName: "CS - Service Desk" };
 const rules = [csdRule];
 
 describe("fixedProject: a ticket rule from Settings", () => {
@@ -43,10 +43,6 @@ describe("suggestForTicket", () => {
     const s = suggestForTicket("CSD-1", projects, [], rules);
     expect(s).toMatchObject({ project: { id: "sd" }, fixed: true, customerTask: true, reason: "CSD → CS - Service Desk" });
     expect(s?.task).toBeUndefined();
-  });
-
-  it("a rule without 'task from customer' leaves the task to you", () => {
-    expect(suggestForTicket("CSD-1", projects, [], [{ ...csdRule, taskFromCustomer: false }])?.customerTask).toBe(false);
   });
 
   it("a rule wins over another project you used for that prefix", () => {

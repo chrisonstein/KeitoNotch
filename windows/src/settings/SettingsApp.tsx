@@ -309,12 +309,9 @@ function TicketRules({ prefs, update }: { prefs: Prefs; update: (p: Partial<Pref
       <h2>Ticket rules</h2>
       <p className="lead">
         For tickets that always go to one Keito project, e.g. a service desk: every <code>CSD-…</code> ticket on "Service Desk".
+        The task is the ticket's customer: the organisation on the ticket in Jira, matched to the task with that name. If
+        that match isn't clear, the form asks you to pick; a ticket without a customer gets the task you used last.
         Tickets without a rule follow where they were logged before.
-      </p>
-      <p className="lead">
-        <b>Task from Jira customer</b>: on a service desk each customer usually has its own task. With this on, the task is the
-        customer named on the ticket in Jira (its <i>Organizations</i> field); when that isn't clear, the form asks you to pick.
-        Off: the task you used last on that project.
       </p>
       {rules.length > 0 && (
         <div className="group">
@@ -341,21 +338,13 @@ function TicketRules({ prefs, update }: { prefs: Prefs; update: (p: Partial<Pref
                 {r.projectId && !projects?.some((p) => p.id === r.projectId) && <option value={r.projectId}>{r.projectName}</option>}
                 {projects?.map((p) => <option key={p.id} value={p.id}>{label(p)}</option>)}
               </select>
-              {/* Switch and text in one label: a click on either flips it. */}
-              <label className="rule-toggle" title="Task = the ticket's customer in Jira (Organizations); off: the last task you used">
-                <span className="switch">
-                  <input type="checkbox" checked={r.taskFromCustomer} onChange={(e) => change(i, { taskFromCustomer: e.target.checked })} />
-                  <span />
-                </span>
-                Task from Jira customer
-              </label>
               <button className="icon-btn" aria-label={`Remove rule ${r.prefix || i + 1}`} onClick={() => set(rules.filter((_, j) => j !== i))}><Trash /></button>
             </div>
           ))}
         </div>
       )}
       <div className="actions">
-        <button className="pill outline" onClick={() => set([...rules, { prefix: "", projectId: "", projectName: "", taskFromCustomer: false }])}>
+        <button className="pill outline" onClick={() => set([...rules, { prefix: "", projectId: "", projectName: "" }])}>
           Add rule
         </button>
         {problem && <StatusLine status={{ ok: false, text: problem }} />}

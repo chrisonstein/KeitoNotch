@@ -30,7 +30,7 @@ export interface TicketSuggestion {
   task?: TaskItem;
   /** A ticket rule says this prefix always books here: it wins over a project you already had in the form. */
   fixed: boolean;
-  /** The rule takes the task from the ticket's customer (Jira Organizations), e.g. on a service desk. */
+  /** A ticket rule applies: the task is the ticket's customer (Jira Organizations) when Jira names one. */
   customerTask: boolean;
   reason: string;
 }
@@ -57,7 +57,7 @@ export function suggestForTicket(key: string, projects: Project[], history: Time
   const prefix = prefixOf(k);
   const ruled = fixedProject(k, projects, rules);
   const fixed = ruled?.project;
-  const customerTask = !!ruled?.rule.taskFromCustomer;
+  const customerTask = !!ruled;
   const refOf = (e: TimeEntry) => e.external_reference?.id?.toUpperCase() ?? "";
   const byId = (id: string | undefined) => (id ? projects.find((p) => p.id === id) : undefined);
 

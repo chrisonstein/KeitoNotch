@@ -311,28 +311,30 @@ export function EntryForm({ nav }: { nav: Nav }) {
     const chosenBefore = projectChosen.current;
     let t = sug.task ?? null;
     let fromJira = false;
+    // Jira names a customer but no single task matches it: ask rather than reuse the last (another customer's) task.
+    let unclear = false;
     if (!t && sug.customerTask) {
       const [orgs, loaded] = await Promise.all([store.ticketOrganizations(key), store.tasksFor(sug.project)]);
       t = taskForOrganization(orgs, loaded) ?? null;
       fromJira = !!t;
+      unclear = orgs.length > 0 && !t;
     }
     // A newer ticket, or you picked a project while the customer was looked up: leave it.
     if (seq !== ticketSeq.current || projectChosen.current !== chosenBefore) return;
-    setTicketReason(fromJira && t ? `${sug.reason} · ${t.name}` : sug.reason);
+    setTicketReason(fromJira && t ? `${sug.reason} · ${t.name}` : unclear ? `${sug.reason} · pick the customer` : sug.reason);
     const { project: current, tasks: loadedTasks, task: currentTask } = latest.current;
     if (current?.id === sug.project.id) {
       // Same project: the task effect won't rerun. A project and task you chose yourself stay.
       if (chosenBefore && currentTask) return;
       if (t) setTask(loadedTasks.find((x) => x.id === t!.id) ?? t);
-      else if (sug.customerTask) {
-        // The task was the last one used: probably another customer, so ask.
+      else if (unclear) {
         setTask(null);
         focusField("task");
       }
       return;
     }
     preferredTask.current = t;
-    ticketNeedsTask.current = sug.customerTask && !t;
+    ticketNeedsTask.current = unclear;
     setTask(null);
     setProject(sug.project);
   };

@@ -70,8 +70,6 @@ export interface TicketRule {
   projectId: string;
   /** For display when the project isn't loaded. */
   projectName: string;
-  /** Pick the task named after the ticket's customer (Jira Service Management "Organizations"). */
-  taskFromCustomer: boolean;
 }
 
 const DEFAULTS: Prefs = {
