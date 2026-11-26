@@ -7,8 +7,9 @@ description: Log time or control the timer in Keito through the Keito Notch app 
 
 Keito Notch (installed per user) ships a small command, `keito.ps1`, that hands a command to the **running**
 app. The app books with the same rules as its form: the same ticket as before → the same project and task;
-a ticket like earlier ones of that Jira project → that project; `CSD-…` → Service Desk with the customer
-(from Jira's Organizations field) as the task. Every booking shows a toast with **Undo** in the notch.
+a ticket like earlier ones of that Jira project → that project; and the user's ticket rules from Settings →
+Jira (e.g. `CSD-…` → Service Desk, with the customer from Jira's Organizations field as the task). Every
+booking shows a toast with **Undo** in the notch.
 
 Run it with PowerShell 7:
 
