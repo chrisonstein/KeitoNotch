@@ -92,19 +92,27 @@ const core = (s: string) => {
 /**
  * The task named after the ticket's customer (in the service-desk setup the task is the customer).
  * Only a single clear match: exact name first, then one task whose name contains the organisation or the
- * other way round. Anything less certain returns undefined, and you pick the task yourself.
+ * other way round. A ticket with two organisations that point at different tasks is just as uncertain (the
+ * first used to win, so Jira's order decided the customer). Anything less certain returns undefined, and you
+ * pick the task yourself.
  */
 export function taskForOrganization(orgs: string[], tasks: TaskItem[]): TaskItem | undefined {
+  const found = new Map<string, TaskItem>();
   for (const org of orgs) {
-    const o = core(org);
-    if (o.length < 2) continue;
-    const exact = tasks.filter((t) => core(t.name) === o);
-    if (exact.length === 1) return exact[0];
-    const loose = tasks.filter((t) => {
-      const c = core(t.name);
-      return c.length >= 3 && (c.includes(o) || o.includes(c));
-    });
-    if (loose.length === 1) return loose[0];
+    const t = taskForOne(org, tasks);
+    if (t) found.set(t.id, t);
   }
-  return undefined;
+  return found.size === 1 ? [...found.values()][0] : undefined;
+}
+
+function taskForOne(org: string, tasks: TaskItem[]): TaskItem | undefined {
+  const o = core(org);
+  if (o.length < 2) return undefined;
+  const exact = tasks.filter((t) => core(t.name) === o);
+  if (exact.length === 1) return exact[0];
+  const loose = tasks.filter((t) => {
+    const c = core(t.name);
+    return c.length >= 3 && (c.includes(o) || o.includes(c));
+  });
+  return loose.length === 1 ? loose[0] : undefined;
 }

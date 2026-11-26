@@ -95,6 +95,13 @@ describe("taskForOrganization: the customer task in Service Desk", () => {
   it("tries the next organisation when the first has no match", () => {
     expect(taskForOrganization(["Unknown", "Globex"], tasks)?.id).toBe("2");
   });
+  it("two organisations with each their own task → undefined, whatever Jira's order", () => {
+    expect(taskForOrganization(["Acme", "Globex"], tasks)).toBeUndefined();
+    expect(taskForOrganization(["Globex", "Acme"], tasks)).toBeUndefined();
+  });
+  it("two organisations that land on the same task → that task", () => {
+    expect(taskForOrganization(["Globex", "Globex B.V."], tasks)?.id).toBe("2");
+  });
 });
 
 describe("recentTicketsOf: the tickets you logged lately", () => {
