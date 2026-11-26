@@ -1,6 +1,7 @@
 // Which Keito project (and task) a Jira ticket books on. Pure logic, no network: the form calls it
 // when you pick a ticket, and once more when the ticket's Jira organisation is known.
 import { projectIdOf, taskIdOf, type JiraIssue, type Project, type TaskItem, type TimeEntry } from "./models";
+import type { TicketRule } from "./prefs";
 
 const KEY = /^[A-Za-z][A-Za-z0-9_]+-\d+$/;
 
@@ -24,41 +25,39 @@ export function recentTicketsOf(history: TimeEntry[], limit: number): JiraIssue[
   return out;
 }
 
-/** Ticket prefixes that always book on one project, found by name. CSD = the service-desk Jira project. */
-export const FIXED_PREFIXES: { prefix: string; project: RegExp; client?: RegExp }[] = [
-  { prefix: "CSD", project: /service\s*-?\s*desk/i, client: /customer\s*support/i },
-];
-
 export interface TicketSuggestion {
   project: Project;
   task?: TaskItem;
-  /** The prefix always books here (CSD): it wins over a project you already had in the form. */
+  /** A ticket rule says this prefix always books here: it wins over a project you already had in the form. */
   fixed: boolean;
+  /** The rule takes the task from the ticket's customer (Jira Organizations), e.g. on a service desk. */
+  customerTask: boolean;
   reason: string;
 }
 
 export const prefixOf = (key: string) => key.split("-")[0]?.toUpperCase() ?? "";
 
-/** The project for a fixed prefix: by name, the one with the matching client first. */
-export function fixedProject(key: string, projects: Project[]): Project | undefined {
-  const rule = FIXED_PREFIXES.find((r) => r.prefix === prefixOf(key));
-  if (!rule) return undefined;
-  const hits = projects.filter((p) => rule.project.test(p.name));
-  if (hits.length <= 1) return hits[0];
-  return (rule.client && hits.find((p) => rule.client!.test(p.client?.name ?? ""))) ?? hits[0];
+/** The rule and project for a ticket's prefix; nothing when there's no rule or its project isn't trackable (any more). */
+export function fixedProject(key: string, projects: Project[], rules: TicketRule[]): { rule: TicketRule; project: Project } | undefined {
+  const prefix = prefixOf(key);
+  const rule = rules.find((r) => r.prefix.trim().toUpperCase() === prefix);
+  const project = rule && projects.find((p) => p.id === rule.projectId);
+  return rule && project ? { rule, project } : undefined;
 }
 
 /**
  * Where a ticket books, strongest first:
  * 1. this exact ticket was logged before → same project and task;
- * 2. a fixed prefix (CSD → Service Desk);
+ * 2. a ticket rule from Settings → Jira (e.g. CSD → Service Desk);
  * 3. another ticket with the same prefix was logged before → that project.
  * `history` is newest first.
  */
-export function suggestForTicket(key: string, projects: Project[], history: TimeEntry[]): TicketSuggestion | undefined {
+export function suggestForTicket(key: string, projects: Project[], history: TimeEntry[], rules: TicketRule[] = []): TicketSuggestion | undefined {
   const k = key.toUpperCase();
   const prefix = prefixOf(k);
-  const fixed = fixedProject(k, projects);
+  const ruled = fixedProject(k, projects, rules);
+  const fixed = ruled?.project;
+  const customerTask = !!ruled?.rule.taskFromCustomer;
   const refOf = (e: TimeEntry) => e.external_reference?.id?.toUpperCase() ?? "";
   const byId = (id: string | undefined) => (id ? projects.find((p) => p.id === id) : undefined);
 
@@ -69,13 +68,13 @@ export function suggestForTicket(key: string, projects: Project[], history: Time
     const tid = taskIdOf(same);
     const task = sameProject.tasks?.find((t) => t.id === tid)
       ?? (same.task && tid ? { id: tid, name: same.task.name ?? "Task" } : undefined);
-    return { project: sameProject, task, fixed: !!fixed, reason: "Logged like this before" };
+    return { project: sameProject, task, fixed: !!fixed, customerTask, reason: "Logged like this before" };
   }
-  if (fixed) return { project: fixed, fixed: true, reason: `${prefix} → ${fixed.name}` };
+  if (fixed) return { project: fixed, fixed: true, customerTask, reason: `${prefix} → ${fixed.name}` };
 
   const sibling = history.find((e) => prefixOf(refOf(e)) === prefix && refOf(e).includes("-") && byId(projectIdOf(e)));
   const siblingProject = sibling && byId(projectIdOf(sibling));
-  if (siblingProject) return { project: siblingProject, fixed: false, reason: `Like earlier ${prefix} tickets` };
+  if (siblingProject) return { project: siblingProject, fixed: false, customerTask: false, reason: `Like earlier ${prefix} tickets` };
   return undefined;
 }
 

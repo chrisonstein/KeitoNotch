@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fixedProject, recentTicketsOf, suggestForTicket, taskForOrganization } from "./ticketRules";
 import type { Project, TimeEntry } from "./models";
+import type { TicketRule } from "./prefs";
 
 const serviceDesk: Project = { id: "sd", name: "CS - Service Desk", client: { id: "c1", name: "Customer support" } };
 const otherDesk: Project = { id: "sd2", name: "Service desk (old)", client: { id: "c2", name: "Internal" } };
@@ -16,59 +17,70 @@ const entry = (key: string, projectId: string, taskId: string, taskName = "Task"
   external_reference: { id: key },
 });
 
-describe("fixedProject: CSD always books on Service Desk", () => {
-  it("finds the service-desk project by name, preferring the Customer support client", () => {
-    expect(fixedProject("CSD-1234", projects)?.id).toBe("sd");
-    expect(fixedProject("csd-9", projects)?.id).toBe("sd");
+/** What you'd set in Settings → Jira → Ticket rules for a service desk. */
+const csdRule: TicketRule = { prefix: "CSD", projectId: "sd", projectName: "CS - Service Desk", taskFromCustomer: true };
+const rules = [csdRule];
+
+describe("fixedProject: a ticket rule from Settings", () => {
+  it("finds the rule's project by id, whatever the key's case", () => {
+    expect(fixedProject("CSD-1234", projects, rules)?.project.id).toBe("sd");
+    expect(fixedProject("csd-9", projects, [{ ...csdRule, prefix: " csd " }])?.project.id).toBe("sd");
   });
-  it("takes the only one when there is no client match", () => {
-    expect(fixedProject("CSD-1", [internal, otherDesk])?.id).toBe("sd2");
-  });
-  it("nothing for other prefixes, or without a service-desk project", () => {
-    expect(fixedProject("MOS-12", projects)).toBeUndefined();
-    expect(fixedProject("CSD-1", [internal, mosaic])).toBeUndefined();
+  it("nothing for other prefixes, without rules, or when the project isn't trackable any more", () => {
+    expect(fixedProject("MOS-12", projects, rules)).toBeUndefined();
+    expect(fixedProject("CSD-1", projects, [])).toBeUndefined();
+    expect(fixedProject("CSD-1", [internal, otherDesk, mosaic], rules)).toBeUndefined();
   });
 });
 
 describe("suggestForTicket", () => {
-  it("CSD without history → Service Desk, fixed", () => {
-    const s = suggestForTicket("CSD-1", projects, []);
-    expect(s?.project.id).toBe("sd");
-    expect(s?.fixed).toBe(true);
+  it("no rules → nothing is built in: CSD is just another prefix", () => {
+    expect(suggestForTicket("CSD-1", projects, [])).toBeUndefined();
+    expect(suggestForTicket("CSD-2", projects, [entry("CSD-1", "int", "t-int")])?.project.id).toBe("int");
+  });
+
+  it("a rule without history → its project, fixed, task from the customer", () => {
+    const s = suggestForTicket("CSD-1", projects, [], rules);
+    expect(s).toMatchObject({ project: { id: "sd" }, fixed: true, customerTask: true, reason: "CSD → CS - Service Desk" });
     expect(s?.task).toBeUndefined();
   });
 
-  it("CSD wins over another project you used for that prefix", () => {
-    const s = suggestForTicket("CSD-2", projects, [entry("CSD-1", "int", "t-int")]);
+  it("a rule without 'task from customer' leaves the task to you", () => {
+    expect(suggestForTicket("CSD-1", projects, [], [{ ...csdRule, taskFromCustomer: false }])?.customerTask).toBe(false);
+  });
+
+  it("a rule wins over another project you used for that prefix", () => {
+    const s = suggestForTicket("CSD-2", projects, [entry("CSD-1", "int", "t-int")], rules);
     expect(s?.project.id).toBe("sd");
   });
 
   it("the same ticket logged before → same project and task (the customer)", () => {
-    const s = suggestForTicket("CSD-5", projects, [entry("CSD-5", "sd", "t-acme", "Acme")]);
+    const s = suggestForTicket("CSD-5", projects, [entry("CSD-5", "sd", "t-acme", "Acme")], rules);
     expect(s?.project.id).toBe("sd");
     expect(s?.task).toEqual({ id: "t-acme", name: "Acme" });
     expect(s?.fixed).toBe(true);
   });
 
-  it("an old CSD entry on another project is ignored: CSD stays Service Desk", () => {
-    const s = suggestForTicket("CSD-5", projects, [entry("CSD-5", "int", "t-int")]);
+  it("an old entry of a ruled ticket on another project is ignored: the rule's project stays", () => {
+    const s = suggestForTicket("CSD-5", projects, [entry("CSD-5", "int", "t-int")], rules);
     expect(s?.project.id).toBe("sd");
     expect(s?.task).toBeUndefined();
   });
 
   it("other prefixes follow the newest earlier ticket with that prefix, not fixed", () => {
-    const s = suggestForTicket("MOS-77", projects, [entry("MOS-3", "mos", "t-dev"), entry("MOS-1", "int", "t-int")]);
+    const s = suggestForTicket("MOS-77", projects, [entry("MOS-3", "mos", "t-dev"), entry("MOS-1", "int", "t-int")], rules);
     expect(s?.project.id).toBe("mos");
     expect(s?.fixed).toBe(false);
+    expect(s?.customerTask).toBe(false);
     expect(s?.task).toBeUndefined();
   });
 
   it("nothing known → no suggestion", () => {
-    expect(suggestForTicket("ABC-1", projects, [entry("MOS-3", "mos", "t")])).toBeUndefined();
+    expect(suggestForTicket("ABC-1", projects, [entry("MOS-3", "mos", "t")], rules)).toBeUndefined();
   });
 
   it("a prefix is not a substring match (CS ≠ CSD)", () => {
-    expect(suggestForTicket("CS-1", projects, [entry("CSD-3", "sd", "t")])).toBeUndefined();
+    expect(suggestForTicket("CS-1", projects, [entry("CSD-3", "sd", "t")], rules)).toBeUndefined();
   });
 });
 

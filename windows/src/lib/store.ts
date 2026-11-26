@@ -769,9 +769,9 @@ export class AppStore {
       .sort((a, b) => (b.spent_date ?? "").localeCompare(a.spent_date ?? "") || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
   }
 
-  /** Where a ticket books: CSD → Service Desk, otherwise where this ticket or its prefix went before. */
+  /** Where a ticket books: a ticket rule from Settings, otherwise where this ticket or its prefix went before. */
   ticketSuggestion(key: string): TicketSuggestion | undefined {
-    return suggestForTicket(key, this.projects, this.ticketHistory());
+    return suggestForTicket(key, this.projects, this.ticketHistory(), this.prefs.ticketRules);
   }
 
   /** Tickets you logged time on lately, newest first (from the entries' Jira links). */

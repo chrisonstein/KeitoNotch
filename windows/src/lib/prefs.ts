@@ -59,6 +59,19 @@ export interface Prefs {
   lastUpdateCheck: number;
   lastProjectId: string | null;
   lastTaskId: string | null;
+  /** Jira prefixes that always book on one project (Settings → Jira → Ticket rules). */
+  ticketRules: TicketRule[];
+}
+
+/** E.g. a service desk: every CSD ticket books on "Service Desk", with the ticket's customer as the task. */
+export interface TicketRule {
+  /** Jira project key, upper case ("CSD"). */
+  prefix: string;
+  projectId: string;
+  /** For display when the project isn't loaded. */
+  projectName: string;
+  /** Pick the task named after the ticket's customer (Jira Service Management "Organizations"). */
+  taskFromCustomer: boolean;
 }
 
 const DEFAULTS: Prefs = {
@@ -90,6 +103,7 @@ const DEFAULTS: Prefs = {
   lastUpdateCheck: 0,
   lastProjectId: null,
   lastTaskId: null,
+  ticketRules: [],
 };
 
 const KEY = "keitonotch.prefs";

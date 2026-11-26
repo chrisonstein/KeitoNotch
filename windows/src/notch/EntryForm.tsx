@@ -297,8 +297,9 @@ export function EntryForm({ nav }: { nav: Nav }) {
   };
 
   /**
-   * The project (and task) the ticket books on: CSD → Service Desk with the ticket's customer as task;
-   * other tickets follow where they (or their prefix) were logged before, unless you chose a project.
+   * The project (and task) the ticket books on: a ticket rule from Settings (e.g. CSD → Service Desk, with the
+   * ticket's customer as task); other tickets follow where they (or their prefix) were logged before, unless
+   * you chose a project.
    */
   const bookTicket = async (key: string) => {
     const seq = ++ticketSeq.current;
@@ -310,7 +311,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
     const chosenBefore = projectChosen.current;
     let t = sug.task ?? null;
     let fromJira = false;
-    if (!t && sug.fixed) {
+    if (!t && sug.customerTask) {
       const [orgs, loaded] = await Promise.all([store.ticketOrganizations(key), store.tasksFor(sug.project)]);
       t = taskForOrganization(orgs, loaded) ?? null;
       fromJira = !!t;
@@ -323,7 +324,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
       // Same project: the task effect won't rerun. A project and task you chose yourself stay.
       if (chosenBefore && currentTask) return;
       if (t) setTask(loadedTasks.find((x) => x.id === t!.id) ?? t);
-      else if (sug.fixed) {
+      else if (sug.customerTask) {
         // The task was the last one used: probably another customer, so ask.
         setTask(null);
         focusField("task");
@@ -331,7 +332,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
       return;
     }
     preferredTask.current = t;
-    ticketNeedsTask.current = sug.fixed && !t;
+    ticketNeedsTask.current = sug.customerTask && !t;
     setTask(null);
     setProject(sug.project);
   };
