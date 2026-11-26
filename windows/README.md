@@ -35,10 +35,10 @@ Picking a ticket in the entry form (or pasting one) also fills in where it books
 
 1. **The same ticket was logged before** → the same project and task.
 2. **A ticket rule** (Settings → Jira → Ticket rules; none by default): a prefix always books on one project,
-   e.g. `CSD` → "Service Desk", even over a project already in the form. With *Task = customer* the task is the
-   ticket's customer: taken from its Jira Service Management *Organizations* field when exactly one task
+   e.g. `CSD` → "Service Desk", even over a project already in the form. With *Task from Jira customer* the task
+   is the ticket's customer: taken from its Jira Service Management *Organizations* field when exactly one task
    matches (two organisations with different tasks count as unclear); otherwise the form asks for the task
-   instead of reusing the last one (that's another customer).
+   instead of reusing the last one (that's another customer). Off: the task you used last on that project.
 3. **Another ticket with the same prefix was logged before** → that project, unless you picked one yourself.
 
 The reason shows next to the ticket in the form.
