@@ -477,14 +477,16 @@ export class AppStore {
 
   // MARK: Timer actions (each offers Undo)
 
-  async stopRunning() {
+  /** Stops the running timer (Undo restarts it). False when nothing ran or Keito refused (see lastError). */
+  async stopRunning(): Promise<boolean> {
     const r = this.running;
-    if (!r) return;
+    if (!r) return false;
     const label = `${this.projectName(r)} at ${fmt.short(this.elapsed)}`;
-    if (!(await this.perform(() => this.keito.stop(r.id)))) return;
+    if (!(await this.perform(() => this.keito.stop(r.id)))) return false;
     this.showToast(`Stopped ${label}`, async () => {
       await this.perform(() => this.keito.restart(r.id));
     });
+    return true;
   }
 
   /** Continues the same row (entries dated today). */
@@ -766,6 +768,11 @@ export class AppStore {
     void this.loadMatchHistory();
   }
 
+  /** Same, but waits for it: a command from outside has no form open that could fill in later. */
+  async ensureTicketHistory() {
+    await this.loadMatchHistory();
+  }
+
   /** All loaded entries, newest first, each once. */
   private ticketHistory(): TimeEntry[] {
     const seen = new Set<string>();
@@ -824,6 +831,18 @@ export class AppStore {
     if (JSON.stringify(next) !== JSON.stringify(before)) {
       this.prefs = savePrefs({ customerTasks: next });
       this.notify();
+    }
+  }
+
+  /** The ticket's title and status; null without Jira or when it can't be read. */
+  async ticketIssue(key: string): Promise<JiraIssue | null> {
+    if (!this.hasJira) return null;
+    const mine = this.myJiraIssues.find((i) => i.key === key);
+    if (mine) return mine;
+    try {
+      return await this.jira.issue(key);
+    } catch {
+      return null;
     }
   }
 

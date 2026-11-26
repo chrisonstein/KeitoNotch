@@ -8,10 +8,12 @@
 //! - secrets in Windows Credential Manager (`keyring`)
 //! - the one-shot 127.0.0.1 listener for Google sign-in (OAuth loopback + PKCE)
 //! - seconds since the last keyboard/mouse input (idle reminder)
+//! - commands from outside the app, e.g. Claude via scripts/keito.ps1 (remote.rs)
 
 mod oauth;
 mod placement;
 mod platform;
+mod remote;
 
 use placement::PlacementState;
 
@@ -271,8 +273,12 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // A second launch (e.g. from the Start menu) just opens the day view of the running one.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| toggle_day(app)))
+        // A second launch (e.g. from the Start menu) just opens the day view of the running one, unless it
+        // carries a command (`--remote`, see remote.rs).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match remote::request_from_args(&args) {
+            Some(request) => remote::deliver(app, request),
+            None => toggle_day(app),
+        }))
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -289,6 +295,7 @@ pub fn run() {
         )
         .manage(oauth::Loopback(Mutex::new(None)))
         .manage(PlacementState(Mutex::new(Default::default())))
+        .manage(remote::Pending::default())
         .invoke_handler(tauri::generate_handler![
             secret_get,
             secret_set,
@@ -307,9 +314,16 @@ pub fn run() {
             quit,
             oauth::oauth_listen,
             oauth::oauth_wait,
+            remote::take_pending_remote,
+            remote::remote_reply,
         ])
         .setup(|app| {
             build_tray(app.handle())?;
+            // Started cold with a command: queue it; the notch picks it up once it has loaded.
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(request) = remote::request_from_args(&args) {
+                remote::deliver(app.handle(), request);
+            }
             // Another app may already own Ctrl+Alt+T; the tray icon still works then.
             if let Err(e) = app.global_shortcut().register("ctrl+alt+t") {
                 eprintln!("Ctrl+Alt+T is taken: {e}");

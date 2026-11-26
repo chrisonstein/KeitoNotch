@@ -23,6 +23,7 @@ import * as fmt from "../lib/duration";
 import type { CalendarEvent, TimeEntry } from "../lib/models";
 import { keyFromLink, looksLikeKey } from "../lib/jira";
 import { reportProblem } from "../lib/problems";
+import { startRemote } from "../lib/remoteBridge";
 import { DayRing, ClientTask, ProjectDot, Spinner, TicketChip } from "./parts";
 import { Play, Plus, Stop } from "../icons";
 import { DayView } from "./DayView";
@@ -192,7 +193,8 @@ export function NotchApp() {
 
   // Start: load data, listen to the tray / hotkey / other windows, check for updates.
   useEffect(() => {
-    void store.start();
+    // Commands from Claude (scripts/keito.ps1) run once the data is there.
+    const stopRemote = startRemote(store.start());
     store.onIdleReturn = () => set("day");
     const offs = [
       listen("toggle-day", () => {
@@ -219,6 +221,7 @@ export function NotchApp() {
     return () => {
       offs.forEach((p) => void p.then((off) => off()));
       stopUpdates();
+      stopRemote();
     };
   }, [set, openForm]);
 
