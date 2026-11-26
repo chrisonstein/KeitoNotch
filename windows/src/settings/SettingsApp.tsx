@@ -104,12 +104,16 @@ function Setting({ label, detail, children }: { label: string; detail?: ReactNod
   );
 }
 
+/**
+ * A switch. It must be a <label>: the real checkbox is 0×0 (hidden behind the drawn track), so a click on the
+ * track only reaches it through the label. As a <span> the switches couldn't be clicked at all.
+ */
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
-    <span className="switch">
+    <label className="switch">
       <input type="checkbox" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span />
-    </span>
+    </label>
   );
 }
 
