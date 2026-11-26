@@ -1,5 +1,6 @@
 // Non-secret settings in localStorage (shared by all windows of the app). Secrets: see native.ts.
 import { secrets } from "./native";
+import type { CustomerTask } from "./ticketRules";
 
 export type Appearance = "system" | "light" | "dark";
 export type Edge = "left" | "right";
@@ -61,6 +62,8 @@ export interface Prefs {
   lastTaskId: string | null;
   /** Jira prefixes that always book on one project (Settings → Jira → Ticket rules). */
   ticketRules: TicketRule[];
+  /** Tasks you picked for a Jira customer on a ruled project; the next ticket of that customer books there. */
+  customerTasks: CustomerTask[];
 }
 
 /** E.g. a service desk: every CSD ticket books on "Service Desk", with the ticket's customer as the task. */
@@ -102,6 +105,7 @@ const DEFAULTS: Prefs = {
   lastProjectId: null,
   lastTaskId: null,
   ticketRules: [],
+  customerTasks: [],
 };
 
 const KEY = "keitonotch.prefs";

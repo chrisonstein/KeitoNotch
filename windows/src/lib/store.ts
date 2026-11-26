@@ -6,7 +6,7 @@ import { KeitoClient, friendlyError } from "./keito";
 import { JiraClient } from "./jira";
 import { CalendarProblem, GoogleAuth, GoogleCalendarClient, NotSignedIn, dedupeKey } from "./google";
 import { matchEvent, type Match } from "./matcher";
-import { recentTicketsOf, suggestForTicket, type TicketSuggestion } from "./ticketRules";
+import { fixedProject, matchCustomer, recentTicketsOf, rememberCustomerTask, suggestForTicket, type CustomerMatch, type TicketSuggestion } from "./ticketRules";
 import { idleStep } from "./idle";
 import { native } from "./native";
 import { hasGoogleClient, hasJira, hasKeito, loadCredentials, loadPrefs, savePrefs, type Credentials, type Favorite, type Prefs } from "./prefs";
@@ -553,7 +553,10 @@ export class AppStore {
       if (input.timing.kind === "duration") u.hours = input.timing.hours;
       const id = input.editing.id;
       const ok = await this.perform(() => this.keito.update(id, u));
-      if (ok) this.showToast("Entry updated");
+      if (ok) {
+        this.showToast("Entry updated");
+        void this.learnCustomerTask(input);
+      }
       return ok;
     }
 
@@ -578,7 +581,9 @@ export class AppStore {
     } else {
       return false;
     }
-    return this.createWithUndo(entry, message);
+    const ok = await this.createWithUndo(entry, message);
+    if (ok) void this.learnCustomerTask(input);
+    return ok;
   }
 
   /** Deletes an entry; Undo recreates it. */
@@ -783,9 +788,42 @@ export class AppStore {
   async ticketOrganizations(key: string): Promise<string[]> {
     if (!this.hasJira) return [];
     try {
-      return await this.jira.organizations(key);
+      const orgs = await this.jira.organizations(key);
+      this.ticketOrgs.set(key.toUpperCase(), orgs);
+      return orgs;
     } catch {
       return [];
+    }
+  }
+
+  /** Customers per ticket as last read from Jira: what learnCustomerTask needs after you book. */
+  private ticketOrgs = new Map<string, string[]>();
+
+  /**
+   * The customer task of a ticket on a ruled project (CSD): a task you picked for that customer before, else the
+   * task named after its Jira organisation, if exactly one fits. No task but `orgs` filled means "ask", not "last task".
+   */
+  async organizationTask(key: string, project: Project): Promise<CustomerMatch> {
+    const [orgs, tasks] = await Promise.all([this.ticketOrganizations(key), this.tasksFor(project)]);
+    return matchCustomer(orgs, tasks, project.id, this.prefs.customerTasks);
+  }
+
+  /**
+   * You booked a ruled ticket of one customer: the next ticket of that customer goes to the same task. Only for a
+   * ticket whose customers were read (the customer lookup ran) and only on the rule's own project.
+   */
+  private async learnCustomerTask(input: EntryInput) {
+    const key = input.jira?.key.toUpperCase();
+    const orgs = key ? this.ticketOrgs.get(key) : undefined;
+    if (!key || orgs?.length !== 1) return;
+    const ruled = fixedProject(key, this.projects, this.prefs.ticketRules);
+    if (ruled?.project.id !== input.project.id) return;
+    const tasks = await this.tasksFor(input.project);
+    const before = loadPrefs().customerTasks;
+    const next = rememberCustomerTask(before, orgs[0], input.project.id, input.task, tasks);
+    if (JSON.stringify(next) !== JSON.stringify(before)) {
+      this.prefs = savePrefs({ customerTasks: next });
+      this.notify();
     }
   }
 

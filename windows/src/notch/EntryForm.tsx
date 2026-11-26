@@ -5,7 +5,6 @@ import { store, useStore, type Timing } from "../lib/store";
 import { savePrefs, type Favorite } from "../lib/prefs";
 import { keyFromLink } from "../lib/jira";
 import { meetingTask } from "../lib/matcher";
-import { taskForOrganization } from "../lib/ticketRules";
 import { addDays, fromKey, isToday, shortDay, startOfDay } from "../lib/dates";
 import * as fmt from "../lib/duration";
 import type { ExternalReference, JiraIssue, Project, TaskItem } from "../lib/models";
@@ -314,10 +313,10 @@ export function EntryForm({ nav }: { nav: Nav }) {
     // Jira names a customer but no single task matches it: ask rather than reuse the last (another customer's) task.
     let unclear = false;
     if (!t && sug.customerTask) {
-      const [orgs, loaded] = await Promise.all([store.ticketOrganizations(key), store.tasksFor(sug.project)]);
-      t = taskForOrganization(orgs, loaded) ?? null;
+      const found = await store.organizationTask(key, sug.project);
+      t = found.task ?? null;
       fromJira = !!t;
-      unclear = orgs.length > 0 && !t;
+      unclear = found.orgs.length > 0 && !t;
     }
     // A newer ticket, or you picked a project while the customer was looked up: leave it.
     if (seq !== ticketSeq.current || projectChosen.current !== chosenBefore) return;

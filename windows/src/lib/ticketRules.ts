@@ -88,30 +88,90 @@ const core = (s: string) => {
   return out.join(" ");
 };
 
-/**
- * The task named after the ticket's customer (in the service-desk setup the task is the customer).
- * Only a single clear match: exact name first, then one task whose name contains the organisation or the
- * other way round. A ticket with two organisations that point at different tasks is just as uncertain (the
- * first used to win, so Jira's order decided the customer). Anything less certain returns undefined, and you
- * pick the task yourself.
- */
-export function taskForOrganization(orgs: string[], tasks: TaskItem[]): TaskItem | undefined {
-  const found = new Map<string, TaskItem>();
-  for (const org of orgs) {
-    const t = taskForOne(org, tasks);
-    if (t) found.set(t.id, t);
-  }
-  return found.size === 1 ? [...found.values()][0] : undefined;
+/** The same customer name in Jira and in the app's memory: "Acme B.V." and "acme" are one customer. */
+export const customerKey = core;
+
+export interface CustomerMatch {
+  /** The task, when exactly one fits all of the ticket's customers. */
+  task?: TaskItem;
+  /** The ticket's customers as Jira names them (Organizations); empty when Jira names none or can't be read. */
+  orgs: string[];
+  /** Tasks whose name looks like a customer's, for "did you mean" when there's no single match. */
+  candidates: TaskItem[];
+  /** The task comes from a choice you made earlier for this customer. */
+  remembered: boolean;
 }
 
-function taskForOne(org: string, tasks: TaskItem[]): TaskItem | undefined {
-  const o = core(org);
+/**
+ * The task named after the ticket's customer (in the service-desk setup the task is the customer).
+ * Per organisation: a task you picked for that customer before (`learned`), else exact name, else one task
+ * whose name contains the organisation or the other way round (several: the longest task name the
+ * organisation starts with: "Acme Energies NL" → "Acme Energies", not "Acme" or "Energies NL").
+ * A ticket with two organisations that point at different tasks is just as uncertain (the first used to win,
+ * so Jira's order decided the customer). Anything less certain has no task, and you pick it yourself.
+ */
+export function matchCustomer(orgs: string[], tasks: TaskItem[], projectId = "", learned: CustomerTask[] = []): CustomerMatch {
+  const found = new Map<string, TaskItem>();
+  const candidates = new Map<string, TaskItem>();
+  let remembered = false;
+  for (const org of orgs) {
+    const o = core(org);
+    const mine = learned.find((l) => l.projectId === projectId && l.org === o);
+    const fromMemory = mine && tasks.find((t) => t.id === mine.taskId);
+    const t = fromMemory ?? taskForOne(o, tasks);
+    if (t) found.set(t.id, t);
+    if (fromMemory) remembered = true;
+    for (const c of looseHits(o, tasks)) candidates.set(c.id, c);
+  }
+  const task = found.size === 1 ? [...found.values()][0] : undefined;
+  return { task, orgs, candidates: [...candidates.values()], remembered: !!task && remembered };
+}
+
+/** Just the task (see matchCustomer). */
+export function taskForOrganization(orgs: string[], tasks: TaskItem[]): TaskItem | undefined {
+  return matchCustomer(orgs, tasks).task;
+}
+
+function looseHits(o: string, tasks: TaskItem[]): TaskItem[] {
+  if (o.length < 2) return [];
+  return tasks.filter((t) => {
+    const c = core(t.name);
+    return c === o || (c.length >= 3 && (c.includes(o) || o.includes(c)));
+  });
+}
+
+function taskForOne(o: string, tasks: TaskItem[]): TaskItem | undefined {
   if (o.length < 2) return undefined;
   const exact = tasks.filter((t) => core(t.name) === o);
   if (exact.length === 1) return exact[0];
-  const loose = tasks.filter((t) => {
-    const c = core(t.name);
-    return c.length >= 3 && (c.includes(o) || o.includes(c));
-  });
-  return loose.length === 1 ? loose[0] : undefined;
+  const loose = looseHits(o, tasks);
+  if (loose.length <= 1) return loose[0];
+  // Several: the brand comes first, so a task the organisation's name starts with wins ("Acme Europe" → "Acme",
+  // not "Europe"); of those, the longest is the most specific. A task holding the whole name keeps it unclear.
+  if (loose.some((t) => core(t.name).includes(o))) return undefined;
+  const prefixes = loose.filter((t) => o.startsWith(`${core(t.name)} `)).sort((a, b) => core(b.name).length - core(a.name).length);
+  if (prefixes.length === 1 || (prefixes.length > 1 && core(prefixes[0].name).length > core(prefixes[1].name).length)) return prefixes[0];
+  return undefined;
+}
+
+/** A task you picked for a Jira customer, so the next ticket of that customer books there by itself. */
+export interface CustomerTask {
+  /** customerKey of the organisation. */
+  org: string;
+  projectId: string;
+  taskId: string;
+  /** For display in Settings. */
+  orgName: string;
+  taskName: string;
+}
+
+/**
+ * After booking a ruled ticket of one customer on `task`: remember it, unless the name match picks that task
+ * anyway (then any old memory for the customer goes). Newest first, at most 500.
+ */
+export function rememberCustomerTask(learned: CustomerTask[], org: string, projectId: string, task: TaskItem, tasks: TaskItem[]): CustomerTask[] {
+  const o = core(org);
+  const rest = learned.filter((l) => !(l.projectId === projectId && l.org === o));
+  if (o.length < 2 || taskForOne(o, tasks)?.id === task.id) return rest;
+  return [{ org: o, projectId, taskId: task.id, orgName: org, taskName: task.name }, ...rest].slice(0, 500);
 }

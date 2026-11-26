@@ -310,7 +310,8 @@ function TicketRules({ prefs, update }: { prefs: Prefs; update: (p: Partial<Pref
       <p className="lead">
         For tickets that always go to one Keito project, e.g. a service desk: every <code>CSD-…</code> ticket on "Service Desk".
         The task is the ticket's customer: the organisation on the ticket in Jira, matched to the task with that name. If
-        that match isn't clear, the form asks you to pick; a ticket without a customer gets the task you used last.
+        that match isn't clear, the form asks you to pick, and remembers your pick for that customer. A ticket without a
+        customer gets the task you used last.
         Tickets without a rule follow where they were logged before.
       </p>
       {rules.length > 0 && (
@@ -349,6 +350,26 @@ function TicketRules({ prefs, update }: { prefs: Prefs; update: (p: Partial<Pref
         </button>
         {problem && <StatusLine status={{ ok: false, text: problem }} />}
       </div>
+      {prefs.customerTasks.length > 0 && (
+        <>
+          <h2>Remembered customers</h2>
+          <p className="lead">Customers whose name didn't match a task, with the task you picked. Remove one to be asked again.</p>
+          <div className="group">
+            {prefs.customerTasks.map((c) => (
+              <div className="fav-row" key={`${c.projectId}|${c.org}`}>
+                <span className="grow">{c.orgName} → {c.taskName}</span>
+                <button
+                  className="icon-btn"
+                  aria-label={`Forget ${c.orgName}`}
+                  onClick={() => update({ customerTasks: prefs.customerTasks.filter((x) => x !== c) })}
+                >
+                  <Trash />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }

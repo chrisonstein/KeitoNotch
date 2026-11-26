@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixedProject, recentTicketsOf, suggestForTicket, taskForOrganization } from "./ticketRules";
+import { fixedProject, matchCustomer, recentTicketsOf, rememberCustomerTask, suggestForTicket, taskForOrganization } from "./ticketRules";
 import type { Project, TimeEntry } from "./models";
 import type { TicketRule } from "./prefs";
 
@@ -109,6 +109,60 @@ describe("taskForOrganization: the customer task in Service Desk", () => {
   });
   it("two organisations that land on the same task → that task", () => {
     expect(taskForOrganization(["Globex", "Globex B.V."], tasks)?.id).toBe("2");
+  });
+  it("a longer Jira name with a region: the task it starts with, not a task with a later word", () => {
+    const withRegion = [...tasks, { id: "7", name: "Europe Logistics" }, { id: "8", name: "Europe" }];
+    expect(taskForOrganization(["Acme-europe"], withRegion)?.id).toBe("1");
+    expect(taskForOrganization(["Acme Energies NL"], tasks)?.id).toBe("5");
+  });
+  it("tasks that merely contain the name stay unclear", () => {
+    expect(taskForOrganization(["Energies"], [...tasks, { id: "6", name: "Energies NL" }])).toBeUndefined();
+  });
+});
+
+describe("matchCustomer: what the form and Claude get back", () => {
+  const tasks = [
+    { id: "1", name: "Acme" },
+    { id: "2", name: "Acme Energies" },
+    { id: "3", name: "Globex" },
+  ];
+  it("no single match: the customer names and the look-alike tasks, for 'did you mean'", () => {
+    // "Acme" is where the name starts, but "Acme Systems Services" holds the whole name: unclear.
+    const m = matchCustomer(["Acme Systems"], [...tasks, { id: "4", name: "Acme Systems Services" }]);
+    expect(m.task).toBeUndefined();
+    expect(m.orgs).toEqual(["Acme Systems"]);
+    expect(m.candidates.map((t) => t.id)).toEqual(["1", "4"]);
+  });
+  it("Jira names no customer → no task, no orgs (the form then uses the last task)", () => {
+    expect(matchCustomer([], tasks)).toEqual({ task: undefined, orgs: [], candidates: [], remembered: false });
+  });
+  it("a remembered pick wins over the name match, only on its own project", () => {
+    const learned = rememberCustomerTask([], "Initrode B.V.", "sd", tasks[2], tasks);
+    expect(matchCustomer(["initrode"], tasks, "sd", learned)).toMatchObject({ task: { id: "3" }, remembered: true });
+    expect(matchCustomer(["initrode"], tasks, "other", learned).task).toBeUndefined();
+  });
+  it("a remembered task that no longer exists falls back to the name match", () => {
+    const learned = rememberCustomerTask([], "Acme", "sd", { id: "gone", name: "Old" }, tasks);
+    expect(matchCustomer(["Acme"], tasks, "sd", learned)).toMatchObject({ task: { id: "1" }, remembered: false });
+  });
+});
+
+describe("rememberCustomerTask", () => {
+  const tasks = [
+    { id: "1", name: "Acme" },
+    { id: "3", name: "Globex" },
+  ];
+  it("stores a pick the name match wouldn't make, newest first, one per customer and project", () => {
+    let l = rememberCustomerTask([], "Initrode", "sd", tasks[1], tasks);
+    l = rememberCustomerTask(l, "Hooli", "sd", tasks[0], tasks);
+    l = rememberCustomerTask(l, "INITRODE B.V.", "sd", tasks[0], tasks);
+    expect(l.map((x) => `${x.org}→${x.taskId}`)).toEqual(["initrode→1", "hooli→1"]);
+    expect(l[0]).toMatchObject({ orgName: "INITRODE B.V.", taskName: "Acme" });
+  });
+  it("a pick the name match makes anyway isn't stored, and clears an old memory", () => {
+    const l = rememberCustomerTask([], "Acme", "sd", tasks[1], tasks);
+    expect(l).toHaveLength(1);
+    expect(rememberCustomerTask(l, "Acme", "sd", tasks[0], tasks)).toEqual([]);
   });
 });
 

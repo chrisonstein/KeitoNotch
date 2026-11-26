@@ -37,8 +37,10 @@ Picking a ticket in the entry form (or pasting one) also fills in where it books
 2. **A ticket rule** (Settings → Jira → Ticket rules; none by default): a prefix always books on one project,
    e.g. `CSD` → "Service Desk", even over a project already in the form. The task is the ticket's customer: its
    Jira Service Management *Organizations* field, matched to the task with that name when exactly one matches (two
-   organisations with different tasks count as unclear). Unclear → the form asks for the task instead of reusing
-   the last one (that's another customer); a ticket without an organisation gets the task you used last.
+   organisations with different tasks count as unclear; "Acme-europe" picks "Acme", the task its name starts with).
+   Unclear → the form asks for the task instead of reusing the last one (that's another customer), and remembers
+   your pick for that customer (Settings → Jira → *Remembered customers*); a ticket without an organisation gets
+   the task you used last.
 3. **Another ticket with the same prefix was logged before** → that project, unless you picked one yourself.
 
 The reason shows next to the ticket in the form.
