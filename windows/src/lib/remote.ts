@@ -152,13 +152,13 @@ export async function resolveBooking(req: RemoteRequest, s: RemoteStore): Promis
   } else if (key) {
     await s.ensureTicketHistory();
     const sug = s.ticketSuggestion(key);
-    if (!sug) return { error: `No project known for ${key} yet: book it once in the app, or pass --project and --task` };
+    if (!sug) return { error: `No project known for ${key} yet: book it once in the app, or pass -Project and -Task` };
     project = sug.project;
     task = sug.task;
     reason = sug.reason;
     if (!task && sug.customerTask && !req.task) task = (await s.organizationTask(key, project)).task;
   } else {
-    return { error: "Give a ticket, or --project and --task" };
+    return { error: "Give a ticket, or -Project and -Task" };
   }
 
   const tasks = await s.tasksFor(project);
@@ -172,12 +172,12 @@ export async function resolveBooking(req: RemoteRequest, s: RemoteStore): Promis
     task = tasks[0];
   } else {
     const names = tasks.slice(0, 10).map((x) => x.name);
-    return { error: `Which task on ${project.name}? Pass --task${names.length ? `. Options: ${names.join(", ")}${tasks.length > 10 ? ", …" : ""}` : ""}` };
+    return { error: `Which task on ${project.name}? Pass -Task${names.length ? `. Options: ${names.join(", ")}${tasks.length > 10 ? ", …" : ""}` : ""}` };
   }
 
   const issue = key ? (await s.ticketIssue(key)) ?? { key, summary: "" } : null;
   const notes = req.notes ?? issue?.summary ?? "";
-  if (s.requireNotes && !notes.trim()) return { error: "Keito requires notes for this entry: pass --notes" };
+  if (s.requireNotes && !notes.trim()) return { error: "Keito requires notes for this entry: pass -Notes" };
   return { project, task, issue, notes, reason };
 }
 

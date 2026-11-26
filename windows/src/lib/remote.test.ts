@@ -113,7 +113,7 @@ describe("runRemote: start and log follow the ticket rules", () => {
     const { s, submitted } = fakeStore({ suggestions: { "CSD-8": { project: serviceDesk, fixed: true, customerTask: true, reason: "CSD → Service Desk" } } });
     const r = await runRemote(req({ verb: "start", ticket: "CSD-8" }), s, now);
     expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/Which task on Service Desk\? Pass --task\. Options: Acme, Globex/);
+    expect(r.message).toMatch(/Which task on Service Desk\? Pass -Task\. Options: Acme, Globex/);
     expect(submitted).toHaveLength(0);
   });
 
@@ -124,7 +124,7 @@ describe("runRemote: start and log follow the ticket rules", () => {
     expect(submitted).toHaveLength(0);
   });
 
-  it("--project and --task by name win over the rules", async () => {
+  it("-Project and -Task by name win over the rules", async () => {
     const { s, submitted } = fakeStore();
     const r = await runRemote(req({ verb: "log", ticket: "XYZ-1", duration: "15m", project: "acme rollout", task: "dev" }), s, now);
     expect(r.ok).toBe(true);

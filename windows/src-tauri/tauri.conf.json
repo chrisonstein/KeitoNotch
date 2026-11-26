@@ -60,6 +60,10 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
+    "resources": {
+      "../scripts/keito.ps1": "keito.ps1",
+      "../claude-skill/keito/SKILL.md": "claude-skill/SKILL.md"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

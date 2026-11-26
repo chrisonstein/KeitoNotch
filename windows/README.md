@@ -45,6 +45,26 @@ Picking a ticket in the entry form (or pasting one) also fills in where it books
 
 The reason shows next to the ticket in the form.
 
+### From a terminal or Claude: `keito.ps1`
+
+The installer puts `keito.ps1` next to the app. It hands a command to the **running** notch, which books it
+with the rules above and shows the usual toast with Undo:
+
+```
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Keito Notch\keito.ps1" status
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Keito Notch\keito.ps1" log CSD-1234 30m -Notes "Printer offline"
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Keito Notch\keito.ps1" start ABC-12
+pwsh -NoProfile -File "$env:LOCALAPPDATA\Keito Notch\keito.ps1" stop
+```
+
+It prints one JSON line; exit 0 = done, 1 = refused (the message says why; it never guesses a project or
+task — pass `-Project`/`-Task`), 2 = no answer (outcome unknown: check `status` before repeating a `log`).
+`keito.ps1 install-skill` copies a Claude Code skill (`claude-skill/keito/SKILL.md`) to `~/.claude/skills/keito`,
+so Claude knows the commands. How it works: `keito-notch.exe --remote <base64url JSON>` reaches the running
+app through the single-instance plugin (`src-tauri/src/remote.rs`), the notch runs it one at a time once its
+data is loaded (`src/lib/remote.ts`, `remoteBridge.ts`) and answers in
+`%LOCALAPPDATA%\ai.keito.notch\remote\<uuid>.json`. No network port.
+
 ### When something crashes
 
 Each window sits in an error boundary (`src/Recover.tsx`): a crash restarts that window's UI (the notch
@@ -60,7 +80,7 @@ this twice a second and on every show, and puts it back; the first few times per
 ```
 src/lib/        app logic (ported 1:1 from the Swift services; no UI)
   keito.ts jira.ts google.ts matcher.ts duration.ts dates.ts store.ts prefs.ts native.ts
-  ticketRules.ts (ticket → project/task) problems.ts (problem log)
+  ticketRules.ts (ticket → project/task) problems.ts (problem log) remote.ts remoteBridge.ts (keito.ps1)
 src/notch/      notch window: NotchApp (tab, peek, controller), DayView, EntryForm, CalendarView
 src/toast/      toast window
 src/settings/   settings window
