@@ -1,6 +1,6 @@
 [package]
 name = "keito-notch"
-version = "0.1.1"
+version = "0.1.2"
 description = "Keito time tracking from a small edge notch"
 edition = "2021"
 
