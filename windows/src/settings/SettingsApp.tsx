@@ -11,7 +11,7 @@ import { CalendarProblem, GoogleAuth, GoogleCalendarClient } from "../lib/google
 import { native, openExternal, secrets, type MonitorInfo, type SecretKey } from "../lib/native";
 import {
   bundledGoogle, loadCredentials, loadPrefs, normaliseHost, savePrefs,
-  type Credentials, type Favorite, type IslandPos, type NotchStyle, type Prefs, type TextSize,
+  type Credentials, type Favorite, type IslandPos, type NotchStyle, type Prefs, type TextSize, type TicketRule,
 } from "../lib/prefs";
 import * as targets from "../lib/targets";
 import { parseDayHours } from "../lib/targets";
@@ -20,7 +20,7 @@ import { checkForUpdate, installUpdate } from "../lib/updates";
 import { projectColor } from "../notch/parts";
 import { applyAppearance } from "../lib/appearance";
 import * as fmt from "../lib/duration";
-import type { CalendarInfo } from "../lib/models";
+import type { CalendarInfo, Project } from "../lib/models";
 import { ArrowDown, ArrowUp, CalendarIcon, Key, Monitor, Power, Star, Ticket, Trash, Update as UpdateIcon, Week } from "../icons";
 
 type Section = "keito" | "jira" | "calendar" | "notch" | "favorites" | "week" | "general";
@@ -79,7 +79,7 @@ export function SettingsApp({ initialSection }: { initialSection: string }) {
       </nav>
       <main className="content">
         {section === "keito" && <KeitoSection prefs={prefs} />}
-        {section === "jira" && <JiraSection prefs={prefs} />}
+        {section === "jira" && <JiraSection prefs={prefs} update={update} />}
         {section === "calendar" && <CalendarSection prefs={prefs} update={update} />}
         {section === "notch" && <NotchSection prefs={prefs} update={update} />}
         {section === "favorites" && <FavoritesSection prefs={prefs} update={update} />}
@@ -210,7 +210,7 @@ function KeitoSection({ prefs }: { prefs: Prefs }) {
 
 // MARK: Jira
 
-function JiraSection({ prefs }: { prefs: Prefs }) {
+function JiraSection({ prefs, update }: { prefs: Prefs; update: (p: Partial<Prefs>) => void }) {
   const [site, setSite] = useState(prefs.jiraSite);
   const [email, setEmail] = useState(prefs.jiraEmail);
   const [token, setToken] = useState("");
@@ -281,6 +281,95 @@ function JiraSection({ prefs }: { prefs: Prefs }) {
         {(saved || prefs.jiraSite) && <button className="pill outline" onClick={() => void disconnect()}>Disconnect</button>}
         <StatusLine status={status} />
       </div>
+      <TicketRules prefs={prefs} update={update} />
+    </>
+  );
+}
+
+/**
+ * Jira projects whose tickets always book on one Keito project (e.g. a service desk). Nothing is built in:
+ * without a rule a ticket follows where it, or its prefix, was logged before.
+ */
+function TicketRules({ prefs, update }: { prefs: Prefs; update: (p: Partial<Prefs>) => void }) {
+  const rules = prefs.ticketRules;
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    void loadCredentials()
+      .then((c) => new KeitoClient(c).trackableProjects())
+      .then(setProjects)
+      .catch((e) => setProblem(`Projects not loaded: ${friendlyError(e)}`));
+  }, []);
+  const set = (next: TicketRule[]) => update({ ticketRules: next });
+  const change = (i: number, patch: Partial<TicketRule>) => set(rules.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const label = (p: Project) => (p.client?.name ? `${p.client.name} · ${p.name}` : p.name);
+
+  return (
+    <>
+      <h2>Ticket rules</h2>
+      <p className="lead">
+        For tickets that always go to one Keito project, e.g. a service desk: every <code>CSD-…</code> ticket on "Service Desk".
+        The task is the ticket's customer: the organisation on the ticket in Jira, matched to the task with that name. If
+        that match isn't clear, the form asks you to pick, and remembers your pick for that customer. A ticket without a
+        customer gets the task you used last.
+        Tickets without a rule follow where they were logged before.
+      </p>
+      {rules.length > 0 && (
+        <div className="group">
+          {rules.map((r, i) => (
+            <div className="fav-row rule-row" key={i}>
+              <input
+                className="prefix"
+                aria-label={`Jira prefix of rule ${i + 1}`}
+                placeholder="CSD"
+                spellCheck={false}
+                value={r.prefix}
+                onChange={(e) => change(i, { prefix: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") })}
+              />
+              <span className="muted">→</span>
+              <select
+                aria-label={`Keito project of rule ${i + 1}`}
+                value={r.projectId}
+                onChange={(e) => {
+                  const p = projects?.find((x) => x.id === e.target.value);
+                  change(i, { projectId: e.target.value, projectName: p ? label(p) : "" });
+                }}
+              >
+                <option value="">Project…</option>
+                {r.projectId && !projects?.some((p) => p.id === r.projectId) && <option value={r.projectId}>{r.projectName}</option>}
+                {projects?.map((p) => <option key={p.id} value={p.id}>{label(p)}</option>)}
+              </select>
+              <button className="icon-btn" aria-label={`Remove rule ${r.prefix || i + 1}`} onClick={() => set(rules.filter((_, j) => j !== i))}><Trash /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="actions">
+        <button className="pill outline" onClick={() => set([...rules, { prefix: "", projectId: "", projectName: "" }])}>
+          Add rule
+        </button>
+        {problem && <StatusLine status={{ ok: false, text: problem }} />}
+      </div>
+      {prefs.customerTasks.length > 0 && (
+        <>
+          <h2>Remembered customers</h2>
+          <p className="lead">Customers whose name didn't match a task, with the task you picked. Remove one to be asked again.</p>
+          <div className="group">
+            {prefs.customerTasks.map((c) => (
+              <div className="fav-row" key={`${c.projectId}|${c.org}`}>
+                <span className="grow">{c.orgName} → {c.taskName}</span>
+                <button
+                  className="icon-btn"
+                  aria-label={`Forget ${c.orgName}`}
+                  onClick={() => update({ customerTasks: prefs.customerTasks.filter((x) => x !== c) })}
+                >
+                  <Trash />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }

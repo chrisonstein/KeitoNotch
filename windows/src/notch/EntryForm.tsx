@@ -51,6 +51,8 @@ export function EntryForm({ nav }: { nav: Nav }) {
   const [jiraIssue, setJiraIssue] = useState<JiraIssue | null>(null);
   const [jiraMine, setJiraMine] = useState<JiraIssue[]>([]);
   const [jiraOther, setJiraOther] = useState<JiraIssue[]>([]);
+  /** Tickets you logged time on lately (from your entries), after your open ones. */
+  const [jiraRecent, setJiraRecent] = useState<JiraIssue[]>([]);
   const [jiraHl, setJiraHl] = useState(0);
   const [jiraLoading, setJiraLoading] = useState(false);
   const [existingRef, setExistingRef] = useState<ExternalReference | null>(null);
@@ -61,6 +63,16 @@ export function EntryForm({ nav }: { nav: Nav }) {
   const [focus, setFocus] = useState<Field | null>(null);
   /** Task to pick once the project's tasks are loaded. */
   const preferredTask = useRef<TaskItem | null>(null);
+  /** A ticket set the project but not the task (CSD, customer unknown): don't fall back to the last task. */
+  const ticketNeedsTask = useRef(false);
+  /** You picked the project yourself (or are editing): only a fixed prefix (CSD) still moves it. */
+  const projectChosen = useRef(false);
+  /** Bumped per ticket, so a slow customer lookup for an older ticket is ignored. */
+  const ticketSeq = useRef(0);
+  /** Why the ticket moved the project, shown next to the ticket. */
+  const [ticketReason, setTicketReason] = useState<string | null>(null);
+  const latest = useRef({ project, tasks, task });
+  latest.current = { project, tasks, task };
 
   const refs = {
     project: useRef<HTMLInputElement>(null),
@@ -96,6 +108,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
         setBillableEdited(true);
       }
       if (editing.task) preferredTask.current = { id: editing.task.id, name: editing.task.name ?? "Task" };
+      projectChosen.current = true;
       setProject(p);
       focusField("notes");
       return;
@@ -123,6 +136,26 @@ export function EntryForm({ nav }: { nav: Nav }) {
     } else {
       focusField("project");
     }
+    // Jira set up: start in the ticket field, so your open and recent tickets are one click away.
+    if (store.hasJira && !seed.ticket) focusField("jira");
+    // Opened with a pasted Jira link or key (Ctrl+V in the day view): link it, which also picks the project.
+    if (seed.ticket) {
+      const key = seed.ticket;
+      if (!store.hasJira) {
+        setNotes(key);
+        return;
+      }
+      const mine = store.myJiraIssues.find((i) => i.key === key);
+      setJiraIssue(mine ?? { key, summary: "" });
+      void (mine ? Promise.resolve(mine) : store.jira.issue(key))
+        .then((issue) => pickIssue(issue))
+        .catch(() => {
+          // Unknown or no access: keep the key so you see what was pasted.
+          setJiraIssue(null);
+          setJiraQuery(key);
+          focusField("jira");
+        });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -140,7 +173,10 @@ export function EntryForm({ nav }: { nav: Nav }) {
       if (cancelled) return;
       setTasksLoading(false);
       setTasks(loaded);
-      const lastTask = editing ? null : store.prefs.lastTaskId;
+      // A CSD ticket without a known customer: the last task is probably another customer, so ask.
+      const needsTask = ticketNeedsTask.current;
+      ticketNeedsTask.current = false;
+      const lastTask = editing || needsTask ? null : store.prefs.lastTaskId;
       const pick = loaded.find((t) => t.id === keep?.id)
         ?? (event ? meetingTask(loaded) : undefined)
         ?? loaded.find((t) => t.id === lastTask)
@@ -149,7 +185,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
       setTask(pick);
       preferredTask.current = null;
       // No obvious task: go straight to the task search.
-      if (!pick && loaded.length && document.activeElement === document.body) focusField("task");
+      if (!pick && loaded.length && (needsTask || document.activeElement === document.body)) focusField("task");
     });
     return () => {
       cancelled = true;
@@ -201,6 +237,8 @@ export function EntryForm({ nav }: { nav: Nav }) {
     } else {
       setProject(p);
     }
+    projectChosen.current = true;
+    setTicketReason(null);
     focusField("notes");
   };
 
@@ -212,6 +250,8 @@ export function EntryForm({ nav }: { nav: Nav }) {
     }
     const p = s.projects.find((x) => x.id === it.id);
     if (!p) return;
+    projectChosen.current = true;
+    setTicketReason(null);
     setProject(p);
     setProjectQuery("");
     refs.project.current?.blur();
@@ -238,7 +278,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
 
   // MARK: Jira
 
-  const jiraResults = [...jiraMine, ...jiraOther];
+  const jiraResults = [...jiraMine, ...jiraRecent, ...jiraOther];
   const jiraActive = focus === "jira" && !jiraIssue;
 
   const pickIssue = (issue: JiraIssue) => {
@@ -252,12 +292,58 @@ export function EntryForm({ nav }: { nav: Nav }) {
       setNotesFromTicket(title);
     }
     focusField("notes");
+    void bookTicket(issue.key);
+  };
+
+  /**
+   * The project (and task) the ticket books on: a ticket rule from Settings (e.g. CSD → Service Desk, with the
+   * ticket's customer as task); other tickets follow where they (or their prefix) were logged before, unless
+   * you chose a project.
+   */
+  const bookTicket = async (key: string) => {
+    const seq = ++ticketSeq.current;
+    const sug = store.ticketSuggestion(key);
+    if (!sug || (!sug.fixed && (projectChosen.current || editing))) {
+      setTicketReason(null);
+      return;
+    }
+    const chosenBefore = projectChosen.current;
+    let t = sug.task ?? null;
+    let fromJira = false;
+    // Jira names a customer but no single task matches it: ask rather than reuse the last (another customer's) task.
+    let unclear = false;
+    if (!t && sug.customerTask) {
+      const found = await store.organizationTask(key, sug.project);
+      t = found.task ?? null;
+      fromJira = !!t;
+      unclear = found.orgs.length > 0 && !t;
+    }
+    // A newer ticket, or you picked a project while the customer was looked up: leave it.
+    if (seq !== ticketSeq.current || projectChosen.current !== chosenBefore) return;
+    setTicketReason(fromJira && t ? `${sug.reason} · ${t.name}` : unclear ? `${sug.reason} · pick the customer` : sug.reason);
+    const { project: current, tasks: loadedTasks, task: currentTask } = latest.current;
+    if (current?.id === sug.project.id) {
+      // Same project: the task effect won't rerun. A project and task you chose yourself stay.
+      if (chosenBefore && currentTask) return;
+      if (t) setTask(loadedTasks.find((x) => x.id === t!.id) ?? t);
+      else if (unclear) {
+        setTask(null);
+        focusField("task");
+      }
+      return;
+    }
+    preferredTask.current = t;
+    ticketNeedsTask.current = unclear;
+    setTask(null);
+    setProject(sug.project);
   };
 
   const removeTicket = () => {
     if (notesFromTicket && notes.trim() === notesFromTicket) setNotes("");
     setNotesFromTicket(null);
     setJiraIssue(null);
+    setTicketReason(null);
+    ticketSeq.current++;
     focusField("jira");
   };
 
@@ -265,6 +351,7 @@ export function EntryForm({ nav }: { nav: Nav }) {
   useEffect(() => {
     if (!jiraActive || !s.hasJira) {
       setJiraMine([]);
+      setJiraRecent([]);
       setJiraOther([]);
       return;
     }
@@ -288,11 +375,23 @@ export function EntryForm({ nav }: { nav: Nav }) {
       const ql = q.toLowerCase();
       return all.filter((i) => i.key.toLowerCase().includes(ql) || i.summary.toLowerCase().includes(ql)).slice(0, 6);
     };
+    const recent = () => {
+      const mineKeys = new Set(mine().map((i) => i.key));
+      const ql = q.toLowerCase();
+      return store.recentTickets(q ? 20 : 6)
+        .filter((i) => !mineKeys.has(i.key) && (!q || i.key.toLowerCase().includes(ql) || i.summary.toLowerCase().includes(ql)))
+        .slice(0, q ? 4 : 6);
+    };
     setJiraMine(mine());
+    setJiraRecent(recent());
     setJiraOther([]);
     setJiraHl(0);
     if (!q) {
-      void store.loadMyJiraIssues().then(() => !cancelled && setJiraMine(mine()));
+      void store.loadMyJiraIssues().then(() => {
+        if (cancelled) return;
+        setJiraMine(mine());
+        setJiraRecent(recent());
+      });
       return () => {
         cancelled = true;
       };
@@ -302,8 +401,8 @@ export function EntryForm({ nav }: { nav: Nav }) {
       try {
         const found = await store.jira.search(q);
         if (cancelled) return;
-        const mineKeys = new Set(mine().map((i) => i.key));
-        setJiraOther(found.filter((i) => !mineKeys.has(i.key)).slice(0, 8));
+        const shown = new Set([...mine(), ...recent()].map((i) => i.key));
+        setJiraOther(found.filter((i) => !shown.has(i.key)).slice(0, 8));
       } catch {
         // Search is a convenience; the user can keep typing.
       } finally {
@@ -410,6 +509,47 @@ export function EntryForm({ nav }: { nav: Nav }) {
 
       <div className="panel-body" style={{ overflowY: focus === "project" || focus === "task" || focus === "jira" ? "visible" : "auto" }}>
         <div className="form">
+          <FieldBox
+            title="Jira ticket"
+            trailing={!s.hasJira ? "Set up Jira in Settings" : jiraIssue && ticketReason ? ticketReason : "Optional · links the entry"}
+            z={5}
+          >
+            {jiraIssue ? (
+              <div className="ticket-box">
+                <TicketChip ticketKey={jiraIssue.key} url={s.ticketUrl(jiraIssue.key, existingRef?.id === jiraIssue.key ? existingRef.permalink : null)} />
+                <span className="ellipsis grow" style={{ fontSize: 12.5 }}>{jiraIssue.summary}</span>
+                <IconButton label={`Remove ticket ${jiraIssue.key}`} onClick={removeTicket}><Close size={10} /></IconButton>
+              </div>
+            ) : (
+              <div className="input">
+                <input
+                  ref={refs.jira}
+                  value={jiraQuery}
+                  placeholder="Pick one of yours, or search key or title"
+                  aria-label="Jira ticket"
+                  disabled={!s.hasJira}
+                  onFocus={() => { setFocus("jira"); store.prepareTicketHistory(); }}
+                  onBlur={() => setFocus(null)}
+                  onChange={(e) => setJiraQuery(e.target.value)}
+                  onKeyDown={listKeys(jiraResults.length, jiraHl, setJiraHl, () =>
+                    jiraResults[jiraHl] ? pickIssue(jiraResults[jiraHl]) : focusField("notes"))}
+                />
+                {jiraLoading && <Spinner />}
+              </div>
+            )}
+            {jiraActive && jiraResults.length > 0 && (
+              <Dropdown
+                sections={[
+                  { title: "Assigned to me", items: jiraMine.map(issueItem) },
+                  { title: "Recently logged", items: jiraRecent.map(issueItem) },
+                  { title: jiraMine.length || jiraRecent.length ? "Other matches" : undefined, items: jiraOther.map(issueItem) },
+                ].filter((x) => x.items.length)}
+                highlight={jiraHl}
+                onPick={(it) => { const i = jiraResults.find((x) => x.key === it.id); if (i) pickIssue(i); }}
+              />
+            )}
+          </FieldBox>
+
           <FieldBox title="Project" trailing={project?.client?.name ?? "Recent first"} z={4}>
             <div className="input">
               {project && focus !== "project" && <ProjectDot id={project.id} />}
@@ -462,42 +602,6 @@ export function EntryForm({ nav }: { nav: Nav }) {
               ) : taskQuery ? (
                 <div className="dropdown muted" style={{ padding: "8px 10px" }}>No task matches “{taskQuery}”</div>
               ) : null
-            )}
-          </FieldBox>
-
-          <FieldBox title="Jira ticket" trailing={s.hasJira ? "Optional · links the entry" : "Set up Jira in Settings"} z={2}>
-            {jiraIssue ? (
-              <div className="ticket-box">
-                <TicketChip ticketKey={jiraIssue.key} url={s.ticketUrl(jiraIssue.key, existingRef?.id === jiraIssue.key ? existingRef.permalink : null)} />
-                <span className="ellipsis grow" style={{ fontSize: 12.5 }}>{jiraIssue.summary}</span>
-                <IconButton label={`Remove ticket ${jiraIssue.key}`} onClick={removeTicket}><Close size={10} /></IconButton>
-              </div>
-            ) : (
-              <div className="input">
-                <input
-                  ref={refs.jira}
-                  value={jiraQuery}
-                  placeholder="Search key or title, e.g. MOS"
-                  aria-label="Jira ticket"
-                  disabled={!s.hasJira}
-                  onFocus={() => setFocus("jira")}
-                  onBlur={() => setFocus(null)}
-                  onChange={(e) => setJiraQuery(e.target.value)}
-                  onKeyDown={listKeys(jiraResults.length, jiraHl, setJiraHl, () =>
-                    jiraResults[jiraHl] ? pickIssue(jiraResults[jiraHl]) : focusField("notes"))}
-                />
-                {jiraLoading && <Spinner />}
-              </div>
-            )}
-            {jiraActive && jiraResults.length > 0 && (
-              <Dropdown
-                sections={[
-                  { title: "Assigned to me", items: jiraMine.map(issueItem) },
-                  { title: jiraMine.length ? "Other matches" : undefined, items: jiraOther.map(issueItem) },
-                ].filter((x) => x.items.length)}
-                highlight={jiraHl}
-                onPick={(it) => { const i = jiraResults.find((x) => x.key === it.id); if (i) pickIssue(i); }}
-              />
             )}
           </FieldBox>
 
@@ -601,7 +705,7 @@ const issueItem = (i: JiraIssue): DropItem => ({ id: i.key, title: i.summary, de
 function FieldBox({ title, trailing, z, children }: { title: string; trailing?: string; z?: number; children: ReactNode }) {
   return (
     <div className="field" style={{ zIndex: z }}>
-      <div className="field-label"><span>{title}</span>{trailing && <span>{trailing}</span>}</div>
+      <div className="field-label"><span>{title}</span>{trailing && <span title={trailing}>{trailing}</span>}</div>
       {children}
     </div>
   );

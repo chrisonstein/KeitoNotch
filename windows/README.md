@@ -24,7 +24,32 @@ Everything from the Mac app, except Apple Calendar (Windows uses Google Calendar
 | Keychain | Windows Credential Manager (service `KeitoNotch`) |
 | Sparkle updates | Tauri updater: daily check, optional automatic install, Settings → General → Check for updates |
 
-Keys: `N` new entry, `S` stop / resume last, `C` from calendar, `Esc` back, `Ctrl+Enter` save.
+Keys: `N` new entry, `S` stop / resume last, `C` from calendar, `Esc` back, `Ctrl+Enter` save,
+`Ctrl+V` in the day view with a Jira link or key (`CSD-1234`) = new entry for that ticket.
+
+### Jira tickets pick the project (Windows only for now)
+
+With Jira set up, the ticket field is the first field of a new entry and has the cursor: its list shows your
+open tickets ("Assigned to me") and the tickets you logged time on lately ("Recently logged"), then search.
+Picking a ticket in the entry form (or pasting one) also fills in where it books (`src/lib/ticketRules.ts`):
+
+1. **The same ticket was logged before** → the same project and task.
+2. **A ticket rule** (Settings → Jira → Ticket rules; none by default): a prefix always books on one project,
+   e.g. `CSD` → "Service Desk", even over a project already in the form. The task is the ticket's customer: its
+   Jira Service Management *Organizations* field, matched to the task with that name when exactly one matches (two
+   organisations with different tasks count as unclear; "Acme-europe" picks "Acme", the task its name starts with).
+   Unclear → the form asks for the task instead of reusing the last one (that's another customer), and remembers
+   your pick for that customer (Settings → Jira → *Remembered customers*); a ticket without an organisation gets
+   the task you used last.
+3. **Another ticket with the same prefix was logged before** → that project, unless you picked one yourself.
+
+The reason shows next to the ticket in the form.
+
+### When something crashes
+
+Each window sits in an error boundary (`src/Recover.tsx`): a crash restarts that window's UI (the notch
+returns to its tab) instead of leaving an empty, invisible window. Crashes and unhandled errors are written to
+`%LOCALAPPDATA%\ai.keito.notch\logs\problems.log` (error, stack and component stack; no Keito or Jira data).
 
 Windows sometimes leaves the always-on-top notch *below* ordinary windows (it keeps `WS_EX_TOPMOST` but sits
 under e.g. a maximised terminal, so the tab is invisible and can't be clicked). `platform::keep_on_top` checks
@@ -35,6 +60,7 @@ this twice a second and on every show, and puts it back; the first few times per
 ```
 src/lib/        app logic (ported 1:1 from the Swift services; no UI)
   keito.ts jira.ts google.ts matcher.ts duration.ts dates.ts store.ts prefs.ts native.ts
+  ticketRules.ts (ticket → project/task) problems.ts (problem log)
 src/notch/      notch window: NotchApp (tab, peek, controller), DayView, EntryForm, CalendarView
 src/toast/      toast window
 src/settings/   settings window
