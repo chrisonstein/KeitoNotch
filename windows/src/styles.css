@@ -191,8 +191,10 @@ input, textarea, select { font: inherit; color: inherit; user-select: text; }
 .hours input.bad { border-color: var(--danger-text); }
 .fav-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
 .fav-row + .fav-row { border-top: 1px solid var(--line); }
-.fav-row input { flex: 1; height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--raise); outline: none; }
+.fav-row input:not([type="checkbox"]) { flex: 1; height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--raise); outline: none; }
 
+/* Wrapper that keeps the peek card closed while the pointer is on the + / stop button. */
+.ring-hover { display: flex; flex: none; }
 .ring-btn {
   position: relative;
   border: none;
@@ -433,7 +435,7 @@ textarea.input-area:focus { background: var(--raise2); border-color: var(--accen
 
 .ticket-box { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; background: var(--raise); border: 1px solid var(--line); }
 
-.switch { position: relative; width: 36px; height: 20px; flex: none; }
+.switch { position: relative; width: 36px; height: 20px; flex: none; cursor: pointer; }
 .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
 .switch span { position: absolute; inset: 0; border-radius: 10px; background: var(--bar-track); transition: background 0.15s; }
 .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }

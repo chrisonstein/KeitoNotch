@@ -2,7 +2,15 @@
 // Styles: edge notch (left/right edge), island (floating pill, five positions) or tray only (nothing on screen
 // until you click the tray icon). Follows the chosen display, tucks away next to full-screen apps, and can be
 // dragged to a new spot.
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { store, useStore } from "../lib/store";
@@ -13,6 +21,7 @@ import { installUpdate, startDailyChecks } from "../lib/updates";
 import { dayKey } from "../lib/dates";
 import * as fmt from "../lib/duration";
 import type { CalendarEvent, TimeEntry } from "../lib/models";
+import { reportProblem } from "../lib/problems";
 import { DayRing, ClientTask, ProjectDot, Spinner, TicketChip } from "./parts";
 import { Play, Plus, Stop } from "../icons";
 import { DayView } from "./DayView";
@@ -129,7 +138,7 @@ export function NotchApp() {
   const settingsOffered = useRef(false);
   const currentMonitor = useRef("");
   const blurClosedAt = useRef(0);
-  const drag = useRef<{ x: number; y: number; active: boolean; pending: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; active: boolean; pending: boolean; native: boolean } | null>(null);
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const tuckedRef = useRef(tucked);
@@ -290,10 +299,13 @@ export function NotchApp() {
   useEffect(() => {
     let edgeHits = 0;
     let revealedAt = 0;
+    let reTopLogged = 0;
     const timer = window.setInterval(async () => {
       const p = store.prefs;
       if (p.style === "tray") return;
       const st = await native.screenState(p.style, p.edge, p.island).catch(() => null);
+      // Rare and invisible otherwise: note the first few, so the log shows how often Windows buries the notch.
+      if (st?.reTopped && reTopLogged++ < 5) reportProblem("notch was below other windows; put back on top", "z-order");
       if (!st || drag.current?.active) return;
       const m = modeRef.current;
       if (p.display === "active" && m === "collapsed" && st.pointerMonitor && st.pointerMonitor !== currentMonitor.current) {
@@ -343,21 +355,71 @@ export function NotchApp() {
     return () => document.removeEventListener("keydown", onKey);
   }, [back, openForm, set, requestResume]);
 
-  // Drag the collapsed notch: the edge notch slides along the edge; the island snaps to the nearest spot.
+  /** After a drop: snap to the spot under the pointer (edge: that height; island: the nearest of five). */
+  const settleDrop = (st: { fx: number; fy: number } | null) => {
+    const p = store.prefs;
+    if (st) {
+      if (p.style === "island") savePrefs({ island: snapIsland(st.fx, st.fy) });
+      else savePrefs({ position: Math.min(0.96, Math.max(0.04, st.fy)) });
+    }
+    store.reloadPrefs();
+    setDragPos(null);
+    setDragIsland(null);
+    // Place it again even when the spot didn't change: the window was moved by hand.
+    setDisplayTick((t) => t + 1);
+    // Dragged by the peek card: shrink back into the tab at its new spot (the pointer may be elsewhere by now,
+    // so no mouseleave would come to close it).
+    if (modeRef.current === "peek") {
+      setGrown(false);
+      window.clearTimeout(shrinkTimer.current);
+      shrinkTimer.current = window.setTimeout(() => setMode((m) => (m === "peek" ? "collapsed" : m)), MORPH_MS);
+    }
+  };
+
+  /** A native drag swallows the mouse-up: watch the button until it's released, then snap. */
+  const awaitNativeDrop = async (d: NonNullable<typeof drag.current>) => {
+    for (let i = 0; i < 600; i++) {
+      const p = store.prefs;
+      const st = await native.screenState(p.style, p.edge, p.island).catch(() => null);
+      if (drag.current !== d) return;
+      if (st?.mouseDown) {
+        await new Promise((r) => window.setTimeout(r, 100));
+        continue;
+      }
+      drag.current = null;
+      settleDrop(st);
+      return;
+    }
+    drag.current = null;
+    settleDrop(null);
+  };
+
+  // Drag the notch by its tab or peek card. Windows moves the window with the pointer (like a title bar); on
+  // release it snaps into place. Before 26-11 the window stayed put and only jumped once the pointer crossed a
+  // third of the screen, which felt like "dragging doesn't work". That jumping is kept as the fallback.
   const dragHandlers: DragHandlers = {
     onPointerDown(e) {
       if (e.button !== 0) return;
       window.clearTimeout(hoverTimer.current);
-      drag.current = { x: e.screenX, y: e.screenY, active: false, pending: false };
+      drag.current = { x: e.screenX, y: e.screenY, active: false, pending: false, native: false };
     },
     onPointerMove(e) {
       const d = drag.current;
-      if (!d) return;
+      if (!d || d.native) return;
       if (!d.active) {
         if (Math.hypot(e.screenX - d.x, e.screenY - d.y) < 5) return;
-        // Capture only once it's a drag, so a plain click still reaches the ring button.
         d.active = true;
-        e.currentTarget.setPointerCapture(e.pointerId);
+        d.native = true;
+        const target = e.currentTarget;
+        const pointerId = e.pointerId;
+        void getCurrentWindow().startDragging()
+          .then(() => awaitNativeDrop(d))
+          .catch(() => {
+            // No native drag: fall back to jumping between spots while the pointer moves.
+            d.native = false;
+            if (drag.current === d) target.setPointerCapture(pointerId);
+          });
+        return;
       }
       if (d.pending) return;
       d.pending = true;
@@ -371,19 +433,34 @@ export function NotchApp() {
     },
     onPointerUp() {
       const d = drag.current;
+      // A native drag ends in awaitNativeDrop (Windows usually eats this mouse-up anyway).
+      if (d?.native) return;
       drag.current = null;
       if (!d?.active) return;
       swallowNextClick();
       if (dragPos !== null) savePrefs({ position: dragPos });
       if (dragIsland !== null) savePrefs({ island: dragIsland });
-      store.reloadPrefs();
-      setDragPos(null);
-      setDragIsland(null);
+      settleDrop(null);
+    },
+  };
+
+  /** Pointer on the ring button (+ / stop): the card waits, otherwise it covers the button before you can click. */
+  const onRing = useRef(false);
+  const ringHover = {
+    onMouseEnter() {
+      onRing.current = true;
+      window.clearTimeout(hoverTimer.current);
+    },
+    onMouseLeave(e: ReactMouseEvent<HTMLElement>) {
+      onRing.current = false;
+      // Back on the rest of the tab: the card opens as usual. Off the notch altogether: nothing.
+      const root = e.currentTarget.closest(".notch");
+      if (root && e.relatedTarget instanceof Node && root.contains(e.relatedTarget)) onEnter();
     },
   };
 
   const onEnter = () => {
-    if (!s.prefs.expandOnHover || drag.current || style === "tray") return;
+    if (!s.prefs.expandOnHover || drag.current || style === "tray" || onRing.current) return;
     if (mode === "peek") {
       // Back while the card was shrinking: grow it again instead of collapsing.
       window.clearTimeout(shrinkTimer.current);
@@ -396,7 +473,8 @@ export function NotchApp() {
   };
   const onLeave = () => {
     window.clearTimeout(hoverTimer.current);
-    if (mode !== "peek") return;
+    // Mid-drag the window jumps to the next spot and leaves the pointer behind: not a real "leave".
+    if (mode !== "peek" || drag.current?.active) return;
     // Shrink the card back into the tab first; the window follows when that's done, so it never jumps.
     setGrown(false);
     window.clearTimeout(shrinkTimer.current);
@@ -419,12 +497,12 @@ export function NotchApp() {
     >
       {morphing && (
         <div className={`morph-layer ${grown ? "faded" : ""}`} style={layer(tabSize)}>
-          <Tab nav={nav} island={style === "island"} drag={dragHandlers} quiet={s.prefs.expandOnHover} />
+          <Tab nav={nav} island={style === "island"} drag={dragHandlers} ring={ringHover} quiet={s.prefs.expandOnHover} />
         </div>
       )}
       {morphing && mode === "peek" && (
         <div className={`morph-layer ${grown ? "" : "faded"}`} style={layer(peekSize)}>
-          <Peek nav={nav} />
+          <Peek nav={nav} drag={dragHandlers} />
         </div>
       )}
       {mode === "day" && <DayView nav={nav} />}
@@ -483,7 +561,13 @@ function RingButton({ size, onNewEntry, quiet = false }: { size: number; onNewEn
  * before a tooltip would; but Chromium takes the tooltip text when the pointer arrives and shows it ~1 s
  * later anyway, over the grown card (filmed twice). Removing the title once the card grows is too late.
  */
-function Tab({ nav, island, drag, quiet = false }: { nav: Nav; island: boolean; drag: DragHandlers; quiet?: boolean }) {
+function Tab({ nav, island, drag, ring, quiet = false }: {
+  nav: Nav;
+  island: boolean;
+  drag: DragHandlers;
+  ring: { onMouseEnter(): void; onMouseLeave(e: ReactMouseEvent<HTMLElement>): void };
+  quiet?: boolean;
+}) {
   const s = useStore();
   return (
     <div
@@ -498,7 +582,9 @@ function Tab({ nav, island, drag, quiet = false }: { nav: Nav; island: boolean; 
       }}
       {...drag}
     >
-      <RingButton size={island ? 26 : 34} onNewEntry={() => nav.openForm({ date: new Date() })} quiet={quiet} />
+      <span className="ring-hover" {...ring}>
+        <RingButton size={island ? 26 : 34} onNewEntry={() => nav.openForm({ date: new Date() })} quiet={quiet} />
+      </span>
       <span className="time num">
         {s.running ? fmt.timer(s.elapsed, s.prefs.showSeconds) : <span className="muted">–</span>}
       </span>
@@ -506,12 +592,14 @@ function Tab({ nav, island, drag, quiet = false }: { nav: Nav; island: boolean; 
   );
 }
 
-function Peek({ nav }: { nav: Nav }) {
+/** The card on hover. Draggable too: with "Peek on hover" it covers the tab after 250 ms, so a drag that only
+ * worked on the tab had to start within that quarter second. */
+function Peek({ nav, drag }: { nav: Nav; drag: DragHandlers }) {
   const s = useStore();
   const r = s.running;
   const target = s.target(new Date());
   return (
-    <div className="peek" onClick={() => nav.set("day")}>
+    <div className="peek" onClick={() => nav.set("day")} {...drag}>
       <div className="grow" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {r ? (
           <>
